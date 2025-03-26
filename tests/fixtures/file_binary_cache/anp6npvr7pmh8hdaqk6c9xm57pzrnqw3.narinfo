@@ -1,0 +1,9 @@
+StorePath: /nix/store/anp6npvr7pmh8hdaqk6c9xm57pzrnqw3-ninja-1.12.1
+URL: nar/1ljn6qrs6q37rdqv5pxn6ydbla8ws9y2vfv80xmbna8ch1vr6649.nar.xz
+Compression: xz
+FileHash: sha256:1ljn6qrs6q37rdqv5pxn6ydbla8ws9y2vfv80xmbna8ch1vr6649
+FileSize: 155240
+NarHash: sha256:1fxvycrjmrzwvh2zm800z5v0dg4qxd6jji7c71bxya42rrycymzb
+NarSize: 528544
+References: m3kjnkzvsj983fkzam6hc6vg3sjdcj19-glibc-2.40-66 v5h007i5sh2bjx82ygw0qfh36xn0m252-gcc-14-20241116-lib
+Deriver: yh27lq2was1vm5a2i2hyy031klp8n2ic-ninja-1.12.1.drv

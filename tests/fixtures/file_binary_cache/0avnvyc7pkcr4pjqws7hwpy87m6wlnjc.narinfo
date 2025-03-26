@@ -1,0 +1,11 @@
+StorePath: /nix/store/0avnvyc7pkcr4pjqws7hwpy87m6wlnjc-make-4.4.1.tar.gz
+URL: nar/02j526p6xf6c2wiqm9hb16z48c0sib5izdmknyf9nks0brjkvn3g.nar.xz
+Compression: xz
+FileHash: sha256:02j526p6xf6c2wiqm9hb16z48c0sib5izdmknyf9nks0brjkvn3g
+FileSize: 2347324
+NarHash: sha256:1cf62d12xsm5i7qz5cgk18ca7nh2rwfmnwbl73af6g23xms3pjvr
+NarSize: 2348312
+References: 
+Deriver: cxh8cwlp0z4a7xl6bk7zsqr7ci1hzdq6-make-4.4.1.tar.gz.drv
+Sig: cache.nixos.org-1:4WBTnVZqutmIiQXOiK3QHBtanvxHmaq7c4k1RIztIHzVWQYSsWB70u6iMxTS2y2PlobHxHUQkceyRCmW54uaBg==
+CA: fixed:sha256:1cwgcmwdn7gqn5da2ia91gkyiqs9birr10sy5ykpkaxzcwfzn5nx

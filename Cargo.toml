@@ -1,0 +1,27 @@
+[package]
+name = "nixseparatedebuginfod2"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.97"
+async-compression = { version = "0.4.21", features = ["tokio", "zstd", "xz"] }
+axum = "0.8.1"
+axum-macros = "0.5.0"
+bytes = "1.10.1"
+clap = { version = "4", features = ["derive"] }
+futures = "0.3.31"
+http = "1.3.1"
+pin-project = "1.1.10"
+reqwest = "0.12.15"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+tokio = { version = "1.44.1", features = ["fs", "process", "rt-multi-thread"] }
+tokio-util = { version = "0.7.14", features = ["io-util"] }
+tower-http = { version = "0.6.2", features = ["trace"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+
+[dev-dependencies]
+hmac-sha256 = "1"
+tempfile = "3"

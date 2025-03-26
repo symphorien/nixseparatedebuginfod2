@@ -1,0 +1,9 @@
+StorePath: /nix/store/av9v5320cd2s0wh633dgbfans5zwy47n-gcc-14-20241116-libgcc
+URL: nar/1xabljs3h2qfbdfl1z0hbm1nvlcl27qlvdb8ib0j39f51rvka2dr.nar.xz
+Compression: xz
+FileHash: sha256:1xabljs3h2qfbdfl1z0hbm1nvlcl27qlvdb8ib0j39f51rvka2dr
+FileSize: 74020
+NarHash: sha256:0wdfccp187mcmnbvk464zypkwdjnyfiwkf7d6q0wfinlk5z67j4i
+NarSize: 201856
+References: 
+Deriver: w8bwdzn3zvs5kvwsaw2d0490qykp8nch-gcc-14-20241116.drv
