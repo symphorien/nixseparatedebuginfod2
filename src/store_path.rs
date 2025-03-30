@@ -7,7 +7,7 @@ use std::{
 const NIX_STORE: &str = "/nix/store";
 const HASH_LEN: usize = 32;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StorePath(PathBuf);
 
 impl AsRef<Path> for StorePath {
@@ -45,10 +45,18 @@ impl StorePath {
         let os_hash = &self.name().as_bytes()[..HASH_LEN];
         std::str::from_utf8(os_hash).unwrap()
     }
+
+    pub fn relative(&self) -> &Path {
+        self.0
+            .strip_prefix(NIX_STORE)
+            .unwrap()
+            .strip_prefix(self.name())
+            .unwrap()
+    }
 }
 
 #[test]
-fn test_store_path_relative() {
+fn test_store_path_relative_path() {
     StorePath::new(Path::new(
         "./nix/store/hbqzhmrscihnl9vgvw9nqhlzc64r1gwl-sl-5.05/bin/sl",
     ))
@@ -95,6 +103,23 @@ fn test_store_path_hash() {
     ))
     .unwrap();
     assert_eq!(path.hash(), "hbqzhmrscihnl9vgvw9nqhlzc64r1gwl");
+}
+
+#[test]
+fn test_store_path_relative() {
+    let path = StorePath::new(Path::new(
+        "/nix/store/hbqzhmrscihnl9vgvw9nqhlzc64r1gwl-sl-5.05/bin/sl",
+    ))
+    .unwrap();
+    assert_eq!(path.relative(), Path::new("bin/sl"));
+}
+#[test]
+fn test_store_path_relative_bare_path() {
+    let path = StorePath::new(Path::new(
+        "/nix/store/hbqzhmrscihnl9vgvw9nqhlzc64r1gwl-sl-5.05",
+    ))
+    .unwrap();
+    assert_eq!(path.relative(), Path::new(""));
 }
 /// To remove references, gcc is patched to replace the hash part
 /// of store path by an uppercase version in debug symbols.

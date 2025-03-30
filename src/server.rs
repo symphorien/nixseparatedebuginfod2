@@ -117,7 +117,7 @@ pub async fn run_server(args: Options) -> anyhow::Result<()> {
         &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/file_binary_cache"),
     ));
     let state = ServerState {
-        debuginfod: Arc::new(Debuginfod::new(PathBuf::from("/tmp"), substituter)),
+        debuginfod: Arc::new(Debuginfod::new(PathBuf::from("/tmp"), substituter).await?),
     };
     let app = Router::new()
         .route("/buildid/:buildid/section/:section", get(get_section))

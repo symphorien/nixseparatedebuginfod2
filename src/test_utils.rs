@@ -1,5 +1,5 @@
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Once;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -32,4 +32,12 @@ pub fn setup_logging() {
         let fmt_layer = tracing_subscriber::fmt::layer().with_test_writer();
         tracing_subscriber::registry().with(fmt_layer).init();
     });
+}
+
+pub fn fixture(path: &str) -> PathBuf {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(path);
+    assert!(path.exists());
+    path
 }

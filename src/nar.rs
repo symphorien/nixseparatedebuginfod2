@@ -63,8 +63,8 @@ pub async fn narinfo_to_nar_location<T: AsyncBufRead>(narinfo: T) -> anyhow::Res
 
 #[tokio::test]
 async fn test_narinfo_to_nar_location() {
-    let narinfo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/file_binary_cache/m3kjnkzvsj983fkzam6hc6vg3sjdcj19.narinfo");
+    let narinfo =
+        crate::test_utils::fixture("file_binary_cache/m3kjnkzvsj983fkzam6hc6vg3sjdcj19.narinfo");
     let fd = tokio::fs::File::open(&narinfo).await.unwrap();
     let bufread = tokio::io::BufReader::new(fd);
     let url = narinfo_to_nar_location(bufread).await.unwrap();

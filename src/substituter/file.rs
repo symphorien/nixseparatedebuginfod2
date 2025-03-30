@@ -86,8 +86,7 @@ impl FileSubstituter {
 
     #[cfg(test)]
     pub fn test_fixture() -> Self {
-        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let path = dir.join("tests/fixtures/file_binary_cache");
+        let path = crate::test_utils::fixture("file_binary_cache");
         assert!(path.exists());
         FileSubstituter::new(&path)
     }

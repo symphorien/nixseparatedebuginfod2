@@ -50,7 +50,7 @@ impl<Key: FetcherCacheKey> AsRef<Path> for CachedPath<'_, Key> {
 }
 
 impl<'cache, Key: FetcherCacheKey> CachedPath<'cache, Key> {
-    pub fn join(self, rest: &str) -> Self {
+    pub fn join<T: AsRef<Path>>(self, rest: T) -> Self {
         Self {
             path: self.path.join(rest),
             lock: self.lock,
@@ -73,13 +73,25 @@ fn is_send<T: Send>(x: T) -> T {
     x
 }
 impl<Key: FetcherCacheKey, Fetcher: CachableFetcher<Key>> FetcherCache<Key, Fetcher> {
-    pub fn new(root_dir: PathBuf, fetcher: Fetcher) -> Self {
-        is_send(Self {
+    async fn ensure_dir_exists(&self, subdir: &str) -> anyhow::Result<()> {
+        let path = self.root_dir.join(subdir);
+        match tokio::fs::create_dir(&path).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+            Err(e) => Err(e).context(format!("creating {} for cache", path.display())),
+        }
+    }
+
+    pub async fn new(root_dir: PathBuf, fetcher: Fetcher) -> anyhow::Result<Self> {
+        let cache = Self {
             root_dir,
             fetcher,
             phantom_key: PhantomData::default(),
             lock: Default::default(),
-        })
+        };
+        cache.ensure_dir_exists(PARTIAL).await?;
+        cache.ensure_dir_exists(CACHE).await?;
+        Ok(cache)
     }
     pub fn name(&self) -> &str {
         todo!()

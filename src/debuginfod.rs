@@ -1,4 +1,5 @@
 use std::{
+    ops::Deref,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -55,15 +56,25 @@ async fn return_if_exists<'a, Key: FetcherCacheKey>(
     }
 }
 
+async fn ensure_dir_exists(path: &Path) -> anyhow::Result<()> {
+    match tokio::fs::create_dir(&path).await {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(e) => Err(e).context(format!("creating {} for debuginfod implem", path.display())),
+    }
+}
 impl Debuginfod {
-    pub fn new(cache_path: PathBuf, substituter: BoxedSubstituter) -> Self {
+    pub async fn new(cache_path: PathBuf, substituter: BoxedSubstituter) -> anyhow::Result<Self> {
+        ensure_dir_exists(&cache_path).await?;
         let debuginfo_path = cache_path.join("debuginfo");
         let store_path = cache_path.join("store");
+        ensure_dir_exists(&debuginfo_path).await?;
+        ensure_dir_exists(&store_path).await?;
         let substituter = Arc::new(substituter);
-        Self {
-            debuginfo_fetcher: FetcherCache::new(debuginfo_path, substituter.clone()),
-            store_fetcher: FetcherCache::new(store_path, substituter.clone()),
-        }
+        Ok(Self {
+            debuginfo_fetcher: FetcherCache::new(debuginfo_path, substituter.clone()).await?,
+            store_fetcher: FetcherCache::new(store_path, substituter.clone()).await?,
+        })
     }
     pub async fn debuginfo<'key, 'debuginfod: 'key>(
         &'debuginfod self,
@@ -99,10 +110,23 @@ impl Debuginfod {
                                     symlink.as_ref().display()
                                 )
                             })?;
-                        match self.store_fetcher.get(exe_in_store_path).await {
-                            Ok(Some(exe)) => {
+                        tracing::debug!(
+                            build_id = build_id.deref(),
+                            "executable symlink points to {}",
+                            exe_in_store_path.as_ref().display()
+                        );
+                        match self.store_fetcher.get(exe_in_store_path.clone()).await {
+                            Ok(Some(store_path_root)) => {
+                                let actual_file =
+                                    store_path_root.join(exe_in_store_path.relative());
+                                tracing::debug!(
+                                    build_id = build_id.deref(),
+                                    "fetched {} as {}",
+                                    exe_in_store_path.as_ref().display(),
+                                    actual_file.as_ref().display()
+                                );
                                 // FIXME: what if it still a symlink to another store path
-                                return_if_exists(exe).await
+                                return_if_exists(actual_file).await
                             }
                             Ok(None) => Ok(None),
                             Err(e) => Err(e),
@@ -135,5 +159,55 @@ impl Debuginfod {
         // }
         // as a fallback, have a look at the source of the buildid
         todo!()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use tempfile::tempdir;
+
+    use crate::{
+        build_id::BuildId,
+        debuginfod::Debuginfod,
+        substituter::file::FileSubstituter,
+        test_utils::{file_sha256, setup_logging},
+    };
+
+    #[tokio::test]
+    async fn test_debuginfo_nominal() {
+        setup_logging();
+        let t = tempdir().unwrap();
+        let substituter = FileSubstituter::test_fixture();
+        let debuginfod = Debuginfod::new(t.path().into(), Box::new(substituter))
+            .await
+            .unwrap();
+        // /nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/bin/make
+        let debuginfo = debuginfod
+            .debuginfo(&BuildId::new("66b33fee92bf535e40d29622ce45b4bd01bebc1f").unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        // /nix/store/w4pl4nw4lygw0sca2q0667fkz5b92lvk-gnumake-4.4.1-debug/lib/debug/make
+        assert_eq!(
+            file_sha256(debuginfo.as_ref()),
+            "c7d7299291732384a47af188410469be6e6cdac3ad8652b93947462489d7f2f9"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_executable_nominal() {
+        setup_logging();
+        let t = tempdir().unwrap();
+        let substituter = FileSubstituter::test_fixture();
+        let debuginfod = Debuginfod::new(t.path().into(), Box::new(substituter))
+            .await
+            .unwrap();
+        // /nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/bin/make
+        let buildid = BuildId::new("66b33fee92bf535e40d29622ce45b4bd01bebc1f").unwrap();
+        let executable = debuginfod.executable(&buildid).await.unwrap().unwrap();
+        assert_eq!(
+            file_sha256(dbg!(executable.as_ref())),
+            "a7942bdec982d11d0467e84743bee92138038e7a38f37ec08e5cc6fa5e3d18f3"
+        );
     }
 }
