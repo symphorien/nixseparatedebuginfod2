@@ -1,6 +1,6 @@
 use std::{fmt::Display, ops::Deref};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BuildId(String);
 
 impl BuildId {

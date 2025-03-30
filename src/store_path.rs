@@ -116,12 +116,26 @@ pub fn demangle(storepath: PathBuf) -> PathBuf {
 
 #[test]
 fn test_demangle_nominal() {
-    assert_eq!(demangle(PathBuf::from("/nix/store/JW65XNML1FGF4BFGZGISZCK3LFJWXG6L-GCC-12.3.0/include/c++/12.3.0/bits/vector.tcc")), PathBuf::from("/nix/store/jw65xnml1fgf4bfgzgiszck3lfjwxg6l-GCC-12.3.0/include/c++/12.3.0/bits/vector.tcc"));
+    assert_eq!(
+        demangle(PathBuf::from(
+            "/nix/store/JW65XNML1FGF4BFGZGISZCK3LFJWXG6L-GCC-12.3.0/include/c++/12.3.0/bits/vector.tcc"
+        )),
+        PathBuf::from(
+            "/nix/store/jw65xnml1fgf4bfgzgiszck3lfjwxg6l-GCC-12.3.0/include/c++/12.3.0/bits/vector.tcc"
+        )
+    );
 }
 
 #[test]
 fn test_demangle_noop() {
-    assert_eq!(demangle(PathBuf::from("/nix/store/jw65xnml1fgf4bfgzgiszck3lfjwxg6l-gcc-12.3.0/include/c++/12.3.0/bits/vector.tcc")), PathBuf::from("/nix/store/jw65xnml1fgf4bfgzgiszck3lfjwxg6l-gcc-12.3.0/include/c++/12.3.0/bits/vector.tcc"));
+    assert_eq!(
+        demangle(PathBuf::from(
+            "/nix/store/jw65xnml1fgf4bfgzgiszck3lfjwxg6l-gcc-12.3.0/include/c++/12.3.0/bits/vector.tcc"
+        )),
+        PathBuf::from(
+            "/nix/store/jw65xnml1fgf4bfgzgiszck3lfjwxg6l-gcc-12.3.0/include/c++/12.3.0/bits/vector.tcc"
+        )
+    );
 }
 
 #[test]

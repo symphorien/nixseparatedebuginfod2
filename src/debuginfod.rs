@@ -1,18 +1,51 @@
+use std::{
+    future::Future,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
 use anyhow::Context;
 
 use crate::{
     build_id::BuildId,
-    cache::{CachedPath, FetcherCache},
+    cache::{CachableFetcher, CachedPath, FetcherCache, FetcherCacheKey},
     store_path::StorePath,
+    substituter::{BoxedSubstituter, Substituter},
+    utils::Presence,
 };
 
-pub struct Debuginfod {
-    debuginfo_fetcher: FetcherCache,
-    store_fetcher: FetcherCache,
-    source_unpacker: FetcherCache,
+impl FetcherCacheKey for BuildId {
+    fn as_key(&self) -> &str {
+        self.as_ref()
+    }
+}
+impl FetcherCacheKey for StorePath {
+    fn as_key(&self) -> &str {
+        self.hash()
+    }
 }
 
-async fn return_if_exists<'a>(path: CachedPath<'a>) -> anyhow::Result<Option<CachedPath<'a>>> {
+impl<T: Substituter + Send + Sync + ?Sized + 'static> CachableFetcher<BuildId> for Arc<Box<T>> {
+    async fn fetch<'a>(&'a self, key: &'a BuildId, into: &'a Path) -> anyhow::Result<Presence> {
+        self.build_id_to_debug_output(key, into).await
+    }
+}
+
+impl<T: Substituter + Send + Sync + ?Sized + 'static> CachableFetcher<StorePath> for Arc<Box<T>> {
+    async fn fetch<'a>(&'a self, key: &'a StorePath, into: &'a Path) -> anyhow::Result<Presence> {
+        self.fetch_store_path(key, into).await
+    }
+}
+
+pub struct Debuginfod {
+    debuginfo_fetcher: FetcherCache<BuildId, Arc<BoxedSubstituter>>,
+    store_fetcher: FetcherCache<StorePath, Arc<BoxedSubstituter>>,
+    // source_unpacker: FetcherCache,
+}
+
+async fn return_if_exists<'a, Key: FetcherCacheKey>(
+    path: CachedPath<'a, Key>,
+) -> anyhow::Result<Option<CachedPath<'a, Key>>> {
     match path.as_ref().metadata() {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e).context(format!(
@@ -24,14 +57,20 @@ async fn return_if_exists<'a>(path: CachedPath<'a>) -> anyhow::Result<Option<Cac
 }
 
 impl Debuginfod {
-    pub fn new() -> Self {
-        todo!()
+    pub fn new(cache_path: PathBuf, substituter: BoxedSubstituter) -> Self {
+        let debuginfo_path = cache_path.join("debuginfo");
+        let store_path = cache_path.join("store");
+        let substituter = Arc::new(substituter);
+        Self {
+            debuginfo_fetcher: FetcherCache::new(debuginfo_path, substituter.clone()),
+            store_fetcher: FetcherCache::new(store_path, substituter.clone()),
+        }
     }
     pub async fn debuginfo<'key, 'debuginfod: 'key>(
         &'debuginfod self,
         build_id: &'key BuildId,
-    ) -> anyhow::Result<Option<CachedPath<'key>>> {
-        match self.debuginfo_fetcher.get(build_id).await {
+    ) -> anyhow::Result<Option<CachedPath<'debuginfod, BuildId>>> {
+        match self.debuginfo_fetcher.get(build_id.clone()).await {
             Ok(Some(nar)) => {
                 let debugfile = nar.join(&build_id.in_debug_output("debug"));
                 return_if_exists(debugfile).await
@@ -43,8 +82,8 @@ impl Debuginfod {
     pub async fn executable<'key, 'debuginfod: 'key>(
         &'debuginfod self,
         build_id: &'key BuildId,
-    ) -> anyhow::Result<Option<CachedPath<'key>>> {
-        match self.debuginfo_fetcher.get(build_id).await {
+    ) -> anyhow::Result<Option<CachedPath<'key, StorePath>>> {
+        match self.debuginfo_fetcher.get(build_id.clone()).await {
             Ok(Some(nar)) => {
                 let symlink = nar.join(&build_id.in_debug_output("executable"));
                 match tokio::fs::read_link(symlink.as_ref()).await {
@@ -61,7 +100,7 @@ impl Debuginfod {
                                     symlink.as_ref().display()
                                 )
                             })?;
-                        match self.store_fetcher.get(exe_in_store_path.hash()).await {
+                        match self.store_fetcher.get(exe_in_store_path).await {
                             Ok(Some(exe)) => {
                                 // FIXME: what if it still a symlink to another store path
                                 return_if_exists(exe).await
@@ -80,7 +119,7 @@ impl Debuginfod {
         &self,
         _build_id: &BuildId,
         _path: &str,
-    ) -> anyhow::Result<Option<CachedPath>> {
+    ) -> anyhow::Result<Option<CachedPath<'_, StorePath>>> {
         // when gdb attempts to show the source of a function that comes
         // from a header in another library, the request is store path made
         // relative to /

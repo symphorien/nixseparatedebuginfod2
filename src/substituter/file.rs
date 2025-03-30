@@ -130,6 +130,7 @@ impl FileSubstituter {
     }
 }
 
+#[async_trait::async_trait]
 impl Substituter for FileSubstituter {
     async fn build_id_to_debug_output(
         &self,

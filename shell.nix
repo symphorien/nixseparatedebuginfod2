@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: CC0-1.0
 
-{ pkgs ? import <nixpkgs> {} }:
+{ pkgs ? import <nixos-unstable> {} }:
 with pkgs;
 mkShell {
   nativeBuildInputs = [

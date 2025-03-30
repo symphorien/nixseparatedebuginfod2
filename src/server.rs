@@ -12,15 +12,17 @@ use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::{routing::get, Router};
-use http::header::{HeaderMap, CONTENT_LENGTH};
+use axum::{Router, routing::get};
+use http::header::{CONTENT_LENGTH, HeaderMap};
 use std::os::unix::prelude::MetadataExt;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio_util::io::ReaderStream;
 
+use crate::Options;
 use crate::build_id::BuildId;
 use crate::debuginfod::Debuginfod;
-use crate::Options;
+use crate::substituter::file::FileSubstituter;
 
 #[derive(Clone)]
 struct ServerState {
@@ -72,27 +74,27 @@ fn validate_build_id(raw: &str) -> Result<BuildId, (StatusCode, String)> {
     }
 }
 
-#[axum_macros::debug_handler]
+// #[axum_macros::debug_handler]
 async fn get_debuginfo(
     Path(build_id): Path<String>,
     State(state): State<ServerState>,
 ) -> impl IntoResponse {
     let build_id = validate_build_id(&build_id)?;
-    let res = state.debuginfod.debuginfo(&build_id).await;
+    let res = assert_send(state.debuginfod.debuginfo(&build_id)).await;
     unwrap_file(res).await
 }
 
-#[axum_macros::debug_handler]
+// #[axum_macros::debug_handler]
 async fn get_executable(
     Path(build_id): Path<String>,
     State(state): State<ServerState>,
 ) -> impl IntoResponse {
     let build_id = validate_build_id(&build_id)?;
-    let res = state.debuginfod.executable(&build_id).await;
+    let res = assert_send(state.debuginfod.executable(&build_id)).await;
     unwrap_file(res).await
 }
 
-#[axum_macros::debug_handler]
+// #[axum_macros::debug_handler]
 async fn get_source(
     Path((build_id, request)): Path<(String, String)>,
     State(state): State<ServerState>,
@@ -106,9 +108,18 @@ async fn get_section(Path(_param): Path<(String, String)>) -> impl IntoResponse 
     StatusCode::NOT_IMPLEMENTED
 }
 
+fn assert_send<'a, T>(
+    fut: impl std::future::Future<Output = T> + Send + 'a,
+) -> impl std::future::Future<Output = T> + Send + 'a {
+    fut
+}
+
 pub async fn run_server(args: Options) -> anyhow::Result<()> {
+    let substituter = Box::new(FileSubstituter::new(
+        &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/file_binary_cache"),
+    ));
     let state = ServerState {
-        debuginfod: Arc::new(Debuginfod::new()),
+        debuginfod: Arc::new(Debuginfod::new(PathBuf::from("/tmp"), substituter)),
     };
     let app = Router::new()
         .route("/buildid/:buildid/section/:section", get(get_section))
