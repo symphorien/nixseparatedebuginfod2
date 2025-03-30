@@ -115,7 +115,7 @@ fn assert_send<'a, T, U: std::future::Future<Output = T> + Send + 'a>(fut: U) ->
 pub async fn run_server(args: Options) -> anyhow::Result<()> {
     let substituter = substituter_from_url(&args.substituter).await?;
     let state = ServerState {
-        debuginfod: Arc::new(Debuginfod::new(PathBuf::from("/tmp"), substituter).await?),
+        debuginfod: Arc::new(Debuginfod::new(PathBuf::from(&args.cache_dir), substituter).await?),
     };
     let app = Router::new()
         .route("/buildid/{buildid}/section/{section}", get(get_section))

@@ -25,17 +25,23 @@ pub struct Options {
     /// Substituter (aka binary cache) containing the debug symbols
     #[arg(short, long)]
     substituter: String,
+    /// Directory where files downloaded from the substituter are stored
+    #[arg(short, long, default_value_t = default_cache_directory())]
+    cache_dir: String,
+}
+
+fn default_cache_directory() -> String {
+    std::env::var("XDG_CACHE_HOME")
+        .map(|x| x + "/" + env!("CARGO_PKG_NAME"))
+        .unwrap_or(std::env::var("CACHE_DIRECTORY").unwrap_or_else(|_| {
+            std::env::var("HOME")
+                .map(|x| x + "/.cache/" + env!("CARGO_PKG_NAME"))
+                .unwrap_or("/tmp".into())
+        }))
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    if let (None, Some(dir)) = (
-        std::env::var_os("XDG_CACHE_HOME"),
-        std::env::var_os("CACHE_DIRECTORY"),
-    ) {
-        // this env var is set by systemd
-        std::env::set_var("XDG_CACHE_HOME", dir);
-    }
     if std::env::var_os("RUST_LOG").is_none() {
         std::env::set_var("RUST_LOG", "nixseparatedebuginfod2=info,tower_http=debug")
     }
