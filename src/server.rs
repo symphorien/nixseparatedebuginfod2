@@ -12,17 +12,17 @@ use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::{Router, routing::get};
-use http::header::{CONTENT_LENGTH, HeaderMap};
+use axum::{routing::get, Router};
+use http::header::{HeaderMap, CONTENT_LENGTH};
 use std::os::unix::prelude::MetadataExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio_util::io::ReaderStream;
 
-use crate::Options;
 use crate::build_id::BuildId;
 use crate::debuginfod::Debuginfod;
 use crate::substituter::file::FileSubstituter;
+use crate::Options;
 
 #[derive(Clone)]
 struct ServerState {
@@ -74,7 +74,7 @@ fn validate_build_id(raw: &str) -> Result<BuildId, (StatusCode, String)> {
     }
 }
 
-// #[axum_macros::debug_handler]
+#[axum_macros::debug_handler]
 async fn get_debuginfo(
     Path(build_id): Path<String>,
     State(state): State<ServerState>,
@@ -84,7 +84,7 @@ async fn get_debuginfo(
     unwrap_file(res).await
 }
 
-// #[axum_macros::debug_handler]
+#[axum_macros::debug_handler]
 async fn get_executable(
     Path(build_id): Path<String>,
     State(state): State<ServerState>,
@@ -94,7 +94,7 @@ async fn get_executable(
     unwrap_file(res).await
 }
 
-// #[axum_macros::debug_handler]
+#[axum_macros::debug_handler]
 async fn get_source(
     Path((build_id, request)): Path<(String, String)>,
     State(state): State<ServerState>,
@@ -108,9 +108,7 @@ async fn get_section(Path(_param): Path<(String, String)>) -> impl IntoResponse 
     StatusCode::NOT_IMPLEMENTED
 }
 
-fn assert_send<'a, T>(
-    fut: impl std::future::Future<Output = T> + Send + 'a,
-) -> impl std::future::Future<Output = T> + Send + 'a {
+fn assert_send<'a, T, U: std::future::Future<Output = T> + Send + 'a>(fut: U) -> U {
     fut
 }
 
