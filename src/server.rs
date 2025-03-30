@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! An http server serving the content of [Cache]
+//! An http server serving what [Debuginfod] can fetch.
 //!
 //! References:
 //! Protocol: <https://www.mankier.com/8/debuginfod#Webapi>
