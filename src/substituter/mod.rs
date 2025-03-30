@@ -1,6 +1,8 @@
 pub mod file;
 use std::path::Path;
 
+use anyhow::Context;
+use file::FileSubstituter;
 use serde::Deserialize;
 
 use crate::{build_id::BuildId, store_path::StorePath, utils::Presence};
@@ -30,20 +32,21 @@ pub struct DebugInfoRedirectJson {
 
 pub type BoxedSubstituter = Box<dyn Substituter + Send + Sync + 'static>;
 
-#[async_trait::async_trait]
-impl<'a> Substituter for std::sync::Arc<Box<dyn Substituter + Sync + Send + 'a>> {
-    async fn build_id_to_debug_output(
-        &self,
-        build_id: &BuildId,
-        into: &Path,
-    ) -> anyhow::Result<Presence> {
-        self.build_id_to_debug_output(build_id, into).await
-    }
-    async fn fetch_store_path(
-        &self,
-        store_path: &StorePath,
-        into: &Path,
-    ) -> anyhow::Result<Presence> {
-        self.fetch_store_path(store_path, into).await
+pub async fn substituter_from_url(url: &str) -> anyhow::Result<BoxedSubstituter> {
+    if let Some(path) = url.strip_prefix("file://") {
+        let path = Path::new(path);
+        let _ = tokio::fs::metadata(path).await.with_context(|| {
+            format!(
+                "cannot use {} as Substituter: {} does not exist",
+                url,
+                path.display()
+            )
+        })?;
+        Ok(Box::new(FileSubstituter::new(path)))
+    } else {
+        anyhow::bail!(
+            "I don't know how to handle this kind of Substituter: {}",
+            url
+        );
     }
 }

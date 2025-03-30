@@ -22,6 +22,9 @@ pub struct Options {
     /// Address for the server
     #[arg(short, long, default_value = "127.0.0.1:1949")]
     listen_address: SocketAddr,
+    /// Substituter (aka binary cache) containing the debug symbols
+    #[arg(short, long)]
+    substituter: String,
 }
 
 #[tokio::main]

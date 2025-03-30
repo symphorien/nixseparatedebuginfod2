@@ -21,7 +21,7 @@ use tokio_util::io::ReaderStream;
 
 use crate::build_id::BuildId;
 use crate::debuginfod::Debuginfod;
-use crate::substituter::file::FileSubstituter;
+use crate::substituter::substituter_from_url;
 use crate::Options;
 
 #[derive(Clone)]
@@ -113,17 +113,15 @@ fn assert_send<'a, T, U: std::future::Future<Output = T> + Send + 'a>(fut: U) ->
 }
 
 pub async fn run_server(args: Options) -> anyhow::Result<()> {
-    let substituter = Box::new(FileSubstituter::new(
-        &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/file_binary_cache"),
-    ));
+    let substituter = substituter_from_url(&args.substituter).await?;
     let state = ServerState {
         debuginfod: Arc::new(Debuginfod::new(PathBuf::from("/tmp"), substituter).await?),
     };
     let app = Router::new()
-        .route("/buildid/:buildid/section/:section", get(get_section))
-        .route("/buildid/:buildid/source/*path", get(get_source))
-        .route("/buildid/:buildid/executable", get(get_executable))
-        .route("/buildid/:buildid/debuginfo", get(get_debuginfo))
+        .route("/buildid/{buildid}/section/{section}", get(get_section))
+        .route("/buildid/{buildid}/source/{*path}", get(get_source))
+        .route("/buildid/{buildid}/executable", get(get_executable))
+        .route("/buildid/{buildid}/debuginfo", get(get_debuginfo))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(&args.listen_address)
