@@ -1,9 +1,22 @@
+//! Parsing and utils about Build Ids
+
 use std::{fmt::Display, ops::Deref};
 
+/// A unique identifier for an elf executable or shared object.
+///
+/// The build id of an executable can be obtained as follows:
+///
+/// ```text
+/// file -L /bin/sh
+/// /bin/sh: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /nix/store/maxa3xhmxggrc5v2vc0c3pjb79hjlkp9-glibc-2.40-66/lib/ld-linux-x86-64.so.2, BuildID[sha1]=094b9da7911246c32c8962fe4573d52165304991, for GNU/Linux 3.10.0, not stripped
+/// ```
 #[derive(Debug, Clone)]
 pub struct BuildId(String);
 
 impl BuildId {
+    /// Parses a string into a build id
+    ///
+    /// Fails if the string is not composed of 40 hexadecimal characters.
     pub fn new(str: &str) -> anyhow::Result<Self> {
         if let Some(bad_char) = str.chars().find(|&c| {
             !(('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || ('0' <= c && c <= '9'))
@@ -22,6 +35,8 @@ impl BuildId {
         }
     }
 
+    /// Returns the relative path in a debug output where files related to this build id should be
+    /// located.
     pub fn in_debug_output(&self, extension: &str) -> String {
         format!(
             "lib/debug/.build-id/{}/{}.{}",

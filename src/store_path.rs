@@ -1,3 +1,5 @@
+//! Utils to work with Nix store paths, i.e. `/nix/store/xxx`.
+
 use std::{
     ffi::{OsStr, OsString},
     os::unix::ffi::{OsStrExt, OsStringExt as _},
@@ -8,6 +10,9 @@ const NIX_STORE: &str = "/nix/store";
 const HASH_LEN: usize = 32;
 
 #[derive(Debug, Clone)]
+/// A Nix store path (not necessarily its root)
+///
+/// Currently it hard codes `/nix/store`. Other store locations are not supported.
 pub struct StorePath(PathBuf);
 
 impl AsRef<Path> for StorePath {
@@ -17,6 +22,7 @@ impl AsRef<Path> for StorePath {
 }
 
 impl StorePath {
+    /// Validates that the store path is indeed a store path.
     pub fn new(path: &Path) -> anyhow::Result<Self> {
         anyhow::ensure!(
             path.starts_with(Path::new(NIX_STORE)),
@@ -34,6 +40,7 @@ impl StorePath {
         Ok(Self(path.into()))
     }
 
+    /// Returns the `hash-name` part of the path (after `/nix/store`)
     pub fn name(&self) -> &OsStr {
         match self.0.components().nth(3) {
             Some(std::path::Component::Normal(name)) => name,
@@ -41,11 +48,13 @@ impl StorePath {
         }
     }
 
+    /// Returns the hash part of the path
     pub fn hash(&self) -> &str {
         let os_hash = &self.name().as_bytes()[..HASH_LEN];
         std::str::from_utf8(os_hash).unwrap()
     }
 
+    /// Returns the suffix of the path, excluding `/nix/store/hash-name/`
     pub fn relative(&self) -> &Path {
         self.0
             .strip_prefix(NIX_STORE)

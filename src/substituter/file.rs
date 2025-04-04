@@ -72,12 +72,16 @@ async fn test_read_small_file_missing() {
     read_small_file(&file).await.unwrap().ok_or(()).unwrap_err();
 }
 
+/// Fetching from `file:://` substituters.
+///
+/// The substituter must have been created with `?index-debug-info=true`.
 #[derive(Debug)]
 pub struct FileSubstituter {
     path: PathBuf,
 }
 
 impl FileSubstituter {
+    /// `path` is where the substituter is, minus `file://`
     pub fn new(path: &Path) -> Self {
         FileSubstituter {
             path: path.to_owned(),

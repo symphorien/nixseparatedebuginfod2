@@ -1,3 +1,4 @@
+//! utilities about NAR files (nix archives)
 use anyhow::Context;
 use std::fmt::Debug;
 use std::path::Path;
@@ -10,6 +11,8 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWriteExt};
 /// The path must not exist yet.
 ///
 /// In case of error no guarantee is given that destination is clean.
+///
+/// Currently not a native implementation, actually shells out to `nix-store --restore`.
 pub async fn unpack_nar<T: AsyncRead + Debug>(nar: T, destination: &Path) -> anyhow::Result<()> {
     let mut command = tokio::process::Command::new("nix-store");
     command.arg("--restore");
@@ -49,6 +52,7 @@ pub async fn unpack_nar<T: AsyncRead + Debug>(nar: T, destination: &Path) -> any
 
 const NAR_URL_KEY: &str = "URL: ";
 
+/// Parses a narinfo to find the relative location of the corresponing nar.
 pub async fn narinfo_to_nar_location<T: AsyncBufRead>(narinfo: T) -> anyhow::Result<String> {
     // FIXME: protect against large file with no newline
     let narinfo = pin!(narinfo);

@@ -112,6 +112,9 @@ fn assert_send<'a, T, U: std::future::Future<Output = T> + Send + 'a>(fut: U) ->
     fut
 }
 
+/// Starts the server according to command line arguments contained in `args`.
+///
+/// Does not actually return.
 pub async fn run_server(args: Options) -> anyhow::Result<()> {
     let substituter = substituter_from_url(&args.substituter).await?;
     let state = ServerState {

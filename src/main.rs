@@ -1,3 +1,19 @@
+//! A debuginfod server suitable to serve debug symbols from nix binary caches.
+//!
+//! ### Architecture
+//!
+//! Support for various kinds of binary caches is in [substituter].
+//!
+//! Substituters should not be queries too often for the same store path so a cache implementation
+//! is provided in [cache::FetcherCache].
+//!
+//! The logic mapping build ids to debug symbols, sources, etc. and which is
+//! substituter-independent is in [debuginfod::Debuginfod].
+//!
+//! Functions in [debuginfod::Debuginfod] are reexposed as a server in [server].
+
+#![warn(missing_docs)]
+
 use std::net::SocketAddr;
 
 use clap::Parser;

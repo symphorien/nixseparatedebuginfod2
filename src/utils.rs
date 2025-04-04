@@ -1,3 +1,4 @@
+//! Misc utils
 use std::fmt::Debug;
 use std::path::Path;
 use std::pin::pin;
@@ -8,8 +9,11 @@ use tokio::io::{AsyncBufRead, AsyncRead};
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 #[must_use]
+/// Whether the requested file exists in the substituter or not
 pub enum Presence {
+    /// Yes the substituter has this file or directory
     Found,
+    /// No the substituter does not have this file or directory
     NotFound,
 }
 
@@ -76,6 +80,7 @@ enum DecompressingReaderInner<R: AsyncBufRead> {
     Zstd(#[pin] ZstdDecoder<R>),
     NoCompression(#[pin] R),
 }
+/// A wrapper arount an [`AsyncBufRead`] that transparently decompresses it
 #[pin_project]
 pub struct DecompressingReader<R: AsyncBufRead> {
     name: Vec<u8>,
@@ -84,6 +89,11 @@ pub struct DecompressingReader<R: AsyncBufRead> {
 }
 
 impl<R: AsyncBufRead> DecompressingReader<R> {
+    /// Wraps an [`AsyncBufRead`] whose content is compressed.
+    ///
+    /// Reading from the [`DecompressingReader`] will yield the decompressed bytes.
+    ///
+    /// The format of the compression is guessed from the extension of `path_or_url`.
     pub fn new(reader: R, path_or_url: &[u8]) -> anyhow::Result<Self> {
         let reader = if path_or_url.ends_with(b".nar") {
             DecompressingReaderInner::NoCompression(reader)

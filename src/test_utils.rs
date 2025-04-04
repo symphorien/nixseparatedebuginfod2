@@ -1,3 +1,4 @@
+///! Functions used in tests only
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Once;
@@ -27,6 +28,7 @@ pub fn file_sha256(path: &Path) -> String {
 
 static SETUP_LOGGING: Once = Once::new();
 
+/// Tests calling this function will have tracing log in a way compatible with cargo test.
 pub fn setup_logging() {
     SETUP_LOGGING.call_once(|| {
         let fmt_layer = tracing_subscriber::fmt::layer().with_test_writer();
@@ -34,6 +36,7 @@ pub fn setup_logging() {
     });
 }
 
+/// Path to the `tests/fixture` folder of the repo.
 pub fn fixture(path: &str) -> PathBuf {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")

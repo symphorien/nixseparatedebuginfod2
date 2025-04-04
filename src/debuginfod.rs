@@ -1,3 +1,4 @@
+//! Logic to find debuginfo in a substituter
 use std::{
     ops::Deref,
     path::{Path, PathBuf},
@@ -37,12 +38,15 @@ impl<T: Substituter + Send + Sync + ?Sized + 'static> CachableFetcher<StorePath>
     }
 }
 
+/// The logic behind a debuginfod server: maps build ids to debug symbols, executables, and source
+/// files.
 pub struct Debuginfod {
     debuginfo_fetcher: FetcherCache<BuildId, Arc<BoxedSubstituter>>,
     store_fetcher: FetcherCache<StorePath, Arc<BoxedSubstituter>>,
     // source_unpacker: FetcherCache,
 }
 
+/// Returns the input if this file exists or None if it does not
 async fn return_if_exists<'a, Key: FetcherCacheKey>(
     path: CachedPath<'a, Key>,
 ) -> anyhow::Result<Option<CachedPath<'a, Key>>> {
@@ -56,6 +60,7 @@ async fn return_if_exists<'a, Key: FetcherCacheKey>(
     }
 }
 
+/// Creates this directory if it does not exist yet.
 async fn ensure_dir_exists(path: &Path) -> anyhow::Result<()> {
     match tokio::fs::create_dir(&path).await {
         Ok(()) => Ok(()),
@@ -63,7 +68,10 @@ async fn ensure_dir_exists(path: &Path) -> anyhow::Result<()> {
         Err(e) => Err(e).context(format!("creating {} for debuginfod implem", path.display())),
     }
 }
+
 impl Debuginfod {
+    /// Create a [`Debuginfod`] instance which fetches debug symbols from `substituter` and stores
+    /// cached files into `cache_path`.
     pub async fn new(cache_path: PathBuf, substituter: BoxedSubstituter) -> anyhow::Result<Self> {
         ensure_dir_exists(&cache_path).await?;
         let debuginfo_path = cache_path.join("debuginfo");
@@ -76,6 +84,7 @@ impl Debuginfod {
             store_fetcher: FetcherCache::new(store_path, substituter.clone()).await?,
         })
     }
+    /// Returns the path to ELF object with debug symbols for this build id.
     pub async fn debuginfo<'key, 'debuginfod: 'key>(
         &'debuginfod self,
         build_id: &'key BuildId,
@@ -89,6 +98,10 @@ impl Debuginfod {
             Err(e) => Err(e),
         }
     }
+
+    /// Returns the path to the ELF object with this build id.
+    ///
+    /// It is called executable, but it could also be a share object.
     pub async fn executable<'key, 'debuginfod: 'key>(
         &'debuginfod self,
         build_id: &'key BuildId,
@@ -138,6 +151,11 @@ impl Debuginfod {
             Err(e) => Err(e),
         }
     }
+
+    /// Return the source file matching `path` that led to the compilation of the executable with
+    /// the specified build id.
+    ///
+    /// Matching `path` to actual source file is somewhat fuzzy.
     pub async fn source(
         &self,
         _build_id: &BuildId,
