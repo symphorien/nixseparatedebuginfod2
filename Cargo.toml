@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.97"
 async-compression = { version = "0.4.21", features = ["tokio", "zstd", "xz"] }
+async-lock = "3.4.0"
 async-trait = "0.1.88"
 axum = "0.8.1"
 axum-macros = "0.5.0"
@@ -22,6 +23,7 @@ tokio-util = { version = "0.7.14", features = ["io-util"] }
 tower-http = { version = "0.6.2", features = ["trace"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+weak-table = "0.3.2"
 
 [dev-dependencies]
 hmac-sha256 = "1"

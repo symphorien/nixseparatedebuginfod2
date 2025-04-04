@@ -7,10 +7,12 @@ use std::{
     future::Future,
     marker::PhantomData,
     path::{Path, PathBuf},
+    sync::{Arc, Weak},
 };
 
 use anyhow::Context;
-use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use async_lock::{RwLock, RwLockReadGuardArc, RwLockWriteGuardArc};
+use weak_table::WeakValueHashMap;
 
 use crate::utils::{remove_recursively_if_exists, Presence};
 
@@ -32,19 +34,17 @@ pub trait FetcherCacheKey: Debug + Send + Sync {
 }
 
 /// While this stucture is not dropped, the directory for this cache key may not be modified.
-struct ReadLockedCacheEntry<'cache, Key: FetcherCacheKey> {
+struct ReadLockedCacheEntry<Key: FetcherCacheKey> {
     pub key: Key,
     pub target: PathBuf,
-    #[allow(unused)]
-    lock: RwLockReadGuard<'cache, ()>,
+    lock: RwLockReadGuardArc<()>,
 }
 /// While this structure is not dropped, only the owner may modify the directory corresponding to
 /// this key.
-struct WriteLockedCacheEntry<'cache, Key: FetcherCacheKey> {
+struct WriteLockedCacheEntry<Key: FetcherCacheKey> {
     pub key: Key,
     pub target: PathBuf,
-    #[allow(unused)]
-    lock: RwLockWriteGuard<'cache, ()>,
+    lock: RwLockWriteGuardArc<()>,
 }
 
 /// A function that can be cached with [`FetcherCache`].
@@ -65,18 +65,18 @@ pub trait CachableFetcher<Key: FetcherCacheKey>: Send + Sync {
 }
 
 /// Like [`Path`] but ensures that the path is not modified until dropped.
-pub struct CachedPath<'cache, Key: FetcherCacheKey> {
+pub struct CachedPath<Key: FetcherCacheKey> {
     path: PathBuf,
-    lock: ReadLockedCacheEntry<'cache, Key>,
+    lock: ReadLockedCacheEntry<Key>,
 }
 
-impl<Key: FetcherCacheKey> AsRef<Path> for CachedPath<'_, Key> {
+impl<Key: FetcherCacheKey> AsRef<Path> for CachedPath<Key> {
     fn as_ref(&self) -> &Path {
         self.path.as_ref()
     }
 }
 
-impl<'cache, Key: FetcherCacheKey> CachedPath<'cache, Key> {
+impl<Key: FetcherCacheKey> CachedPath<Key> {
     /// Wrapper around [`Path::join`].
     pub fn join<T: AsRef<Path>>(self, rest: T) -> Self {
         Self {
@@ -85,7 +85,7 @@ impl<'cache, Key: FetcherCacheKey> CachedPath<'cache, Key> {
         }
     }
 
-    fn new(path: PathBuf, lock: ReadLockedCacheEntry<'cache, Key>) -> Self {
+    fn new(path: PathBuf, lock: ReadLockedCacheEntry<Key>) -> Self {
         Self { path, lock }
     }
 }
@@ -96,7 +96,7 @@ pub struct FetcherCache<Key: FetcherCacheKey, Fetcher: CachableFetcher<Key>> {
     root_dir: PathBuf,
     fetcher: Fetcher,
     phantom_key: PhantomData<Key>,
-    lock: RwLock<()>,
+    locks: tokio::sync::Mutex<WeakValueHashMap<String, Weak<RwLock<()>>>>,
 }
 
 impl<Key: FetcherCacheKey, Fetcher: CachableFetcher<Key>> FetcherCache<Key, Fetcher> {
@@ -116,33 +116,56 @@ impl<Key: FetcherCacheKey, Fetcher: CachableFetcher<Key>> FetcherCache<Key, Fetc
             root_dir,
             fetcher,
             phantom_key: PhantomData::default(),
-            lock: Default::default(),
+            locks: Default::default(),
         };
         cache.ensure_dir_exists(PARTIAL).await?;
         cache.ensure_dir_exists(CACHE).await?;
         Ok(cache)
     }
-    fn read_lock<'cache>(
-        &'cache self,
+    async fn entry_lock(&self, key: &Key) -> Arc<RwLock<()>> {
+        let actual_key = key.as_key();
+        let mut lock_map = self.locks.lock().await;
+        lock_map.remove_expired();
+        let current = lock_map.get(actual_key);
+        match current {
+            Some(entry_lock) => entry_lock,
+            None => {
+                let entry_lock = Arc::new(RwLock::new(()));
+                lock_map.insert(actual_key.to_owned(), entry_lock.clone());
+                entry_lock
+            }
+        }
+    }
+    fn read_lock<'a>(
+        &'a self,
         key: Key,
-    ) -> impl Future<Output = ReadLockedCacheEntry<'cache, Key>> + Send {
+    ) -> impl Future<Output = ReadLockedCacheEntry<Key>> + Send + use<'a, Key, Fetcher> {
         async move {
-            // FIXME: actually implement locking
-            let actual_key = key.as_key().to_owned();
+            let actual_key = key.as_key();
             let target = self.root_dir.join(CACHE).join(&actual_key);
-            let lock = self.lock.read().await;
-
+            let entry_lock = self.entry_lock(&key).await;
+            let lock = entry_lock.read_arc().await;
             ReadLockedCacheEntry { key, target, lock }
         }
     }
-    fn upgrade<'cache>(
-        &'cache self,
-        read_lock: ReadLockedCacheEntry<'cache, Key>,
-    ) -> impl Future<Output = WriteLockedCacheEntry<'cache, Key>> + Send {
+    fn upgrade<'a>(
+        &'a self,
+        read_lock: ReadLockedCacheEntry<Key>,
+    ) -> impl Future<Output = WriteLockedCacheEntry<Key>> + Send + use<'a, Key, Fetcher> {
         async move {
-            // FIXME: Racy
-            let ReadLockedCacheEntry { target, key, .. } = read_lock;
-            let write_lock = self.lock.write().await;
+            let entry_lock = self.entry_lock(&read_lock.key).await;
+            let upgradeable_read_lock = entry_lock.upgradable_read_arc().await;
+            let ReadLockedCacheEntry {
+                target,
+                key,
+                lock: read_lock,
+            } = read_lock;
+            // at this point, even if we drop the read_lock, nobody can remove the directory,
+            // because upgradeable_read_lock exists
+            drop(read_lock);
+            let write_lock =
+                async_lock::RwLockUpgradableReadGuardArc::<()>::upgrade(upgradeable_read_lock)
+                    .await;
             WriteLockedCacheEntry {
                 key,
                 target,
@@ -150,32 +173,50 @@ impl<Key: FetcherCacheKey, Fetcher: CachableFetcher<Key>> FetcherCache<Key, Fetc
             }
         }
     }
-    fn downgrade<'cache>(
-        &'cache self,
-        write_lock: WriteLockedCacheEntry<'cache, Key>,
-    ) -> impl Future<Output = ReadLockedCacheEntry<'cache, Key>> + Send {
+    fn downgrade<'a>(
+        &'a self,
+        write_lock: WriteLockedCacheEntry<Key>,
+    ) -> impl Future<Output = ReadLockedCacheEntry<Key>> + Send + use<'a, Fetcher, Key> {
         async move {
-            // FIXME: Racy
-            let WriteLockedCacheEntry { target, key, .. } = write_lock;
-            let lock = self.lock.read().await;
-            ReadLockedCacheEntry { key, target, lock }
+            let entry_lock = self.entry_lock(&write_lock.key).await;
+            let WriteLockedCacheEntry {
+                target,
+                key,
+                lock: write_lock,
+            } = write_lock;
+            let upgradeable_read_lock = RwLockWriteGuardArc::downgrade_to_upgradable(write_lock);
+            // at this point taking a new normal read lock is not a dead lock
+            let read_lock = entry_lock.read_arc().await;
+            // now we can drop the upgradeable_read_lock while ensuring that the directory always
+            // exists
+            drop(upgradeable_read_lock);
+            ReadLockedCacheEntry {
+                key,
+                target,
+                lock: read_lock,
+            }
         }
     }
+    /// returns the corresponding directory if it is still in cache
     fn cached<'cache, 'key>(
         &'cache self,
-        key: &'key ReadLockedCacheEntry<'cache, Key>,
+        key: &'key ReadLockedCacheEntry<Key>,
     ) -> impl Future<Output = anyhow::Result<Option<PathBuf>>> + Send + 'key {
         async move {
-            if key.target.exists() {
+            if tokio::fs::try_exists(&key.target)
+                .await
+                .with_context(|| format!("stat({})", key.target.display()))?
+            {
                 Ok(Some((&key.target).into()))
             } else {
                 Ok(None)
             }
         }
     }
+    /// when the corresponding directory is not in cache, put it there
     fn fetch<'key, 'cache: 'key>(
         &'cache self,
-        key: &'key WriteLockedCacheEntry<'cache, Key>,
+        key: &'key WriteLockedCacheEntry<Key>,
     ) -> impl Future<Output = anyhow::Result<Option<PathBuf>>> + Send + 'key {
         async move {
             let partial_dir = self.root_dir.join(PARTIAL).join(key.key.as_key());
@@ -204,7 +245,8 @@ impl<Key: FetcherCacheKey, Fetcher: CachableFetcher<Key>> FetcherCache<Key, Fetc
     pub fn get(
         &self,
         key: Key,
-    ) -> impl Future<Output = anyhow::Result<Option<CachedPath<'_, Key>>>> + Send {
+    ) -> impl Future<Output = anyhow::Result<Option<CachedPath<Key>>>> + Send + use<'_, Key, Fetcher>
+    {
         async move {
             let lock = self.read_lock(key).await;
             let (lock, result) = match self.cached(&lock).await? {
