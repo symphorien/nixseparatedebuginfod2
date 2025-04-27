@@ -63,17 +63,20 @@ fn default_cache_directory() -> String {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    if std::env::var_os("RUST_LOG").is_none() {
-        std::env::set_var("RUST_LOG", "nixseparatedebuginfod2=info,tower_http=debug")
-    }
     let args = Options::parse();
+    let filter = std::env::var("RUST_LOG")
+        .unwrap_or("nixseparatedebuginfod2=info,tower_http=debug".to_owned());
     let fmt_layer = tracing_subscriber::fmt::layer()
         .without_time()
-        .with_filter(tracing_subscriber::EnvFilter::from_default_env());
+        .with_filter(tracing_subscriber::EnvFilter::builder().parse_lossy(&filter));
     let registry = tracing_subscriber::registry().with(fmt_layer);
 
     #[cfg(feature = "tokio-console")]
     let registry = registry.with(console_subscriber::spawn());
+    #[cfg(feature = "tracing-chrome")]
+    let (chrome_layer, _guard) = tracing_chrome::ChromeLayerBuilder::new().build();
+    #[cfg(feature = "tracing-chrome")]
+    let registry = registry.with(chrome_layer);
 
     registry.init();
 
