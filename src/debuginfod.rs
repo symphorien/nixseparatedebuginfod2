@@ -41,9 +41,12 @@ impl<T: Substituter + Send + Sync + ?Sized + 'static> CachableFetcher<StorePath>
 
 /// The logic behind a debuginfod server: maps build ids to debug symbols, executables, and source
 /// files.
+///
+/// Cloning it returns a reference to the same debuginfod instance.
+#[derive(Clone)]
 pub struct Debuginfod {
-    debuginfo_fetcher: FetcherCache<BuildId, Arc<BoxedSubstituter>>,
-    store_fetcher: FetcherCache<StorePath, Arc<BoxedSubstituter>>,
+    debuginfo_fetcher: Arc<FetcherCache<BuildId, Arc<BoxedSubstituter>>>,
+    store_fetcher: Arc<FetcherCache<StorePath, Arc<BoxedSubstituter>>>,
     // source_unpacker: FetcherCache,
 }
 
@@ -87,11 +90,22 @@ impl Debuginfod {
         ensure_dir_exists(&store_path).await?;
         let substituter = Arc::new(substituter);
         Ok(Self {
-            debuginfo_fetcher: FetcherCache::new(debuginfo_path, substituter.clone(), expiration)
-                .await?,
-            store_fetcher: FetcherCache::new(store_path, substituter.clone(), expiration).await?,
+            debuginfo_fetcher: Arc::new(
+                FetcherCache::new(debuginfo_path, substituter.clone(), expiration).await?,
+            ),
+            store_fetcher: Arc::new(
+                FetcherCache::new(store_path, substituter.clone(), expiration).await?,
+            ),
         })
     }
+
+    /// Spawns tokio tasks to clear downloaded files from the cache when they have not been queried
+    /// for too long.
+    pub fn spawn_cleanup_task(&self) {
+        self.debuginfo_fetcher.clone().spawn_cleanup_task();
+        self.store_fetcher.clone().spawn_cleanup_task();
+    }
+
     /// Returns the path to ELF object with debug symbols for this build id.
     pub async fn debuginfo<'key, 'debuginfod: 'key>(
         &'debuginfod self,

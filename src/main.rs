@@ -45,6 +45,8 @@ pub struct Options {
     #[arg(short, long, default_value_t = default_cache_directory())]
     cache_dir: String,
     /// How long a fetched file should be kept in cache. Only a rough indication.
+    ///
+    /// Accepted syntax: `1 day` `3s` `15 minutes` etc.
     #[arg(short, long, value_parser = humantime::parse_duration)]
     expiration: Duration,
 }

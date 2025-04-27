@@ -125,7 +125,9 @@ pub struct FetcherCache<Key: FetcherCacheKey, Fetcher: CachableFetcher<Key>> {
     expiration: Duration,
 }
 
-impl<Key: FetcherCacheKey, Fetcher: CachableFetcher<Key>> FetcherCache<Key, Fetcher> {
+impl<Key: FetcherCacheKey + 'static, Fetcher: CachableFetcher<Key> + 'static>
+    FetcherCache<Key, Fetcher>
+{
     /// Create a directory inside `self.root`, succeeding if it already exists
     async fn ensure_dir_exists(&self, subdir: &str) -> anyhow::Result<()> {
         let path = self.root_dir.join(subdir);
@@ -272,7 +274,6 @@ impl<Key: FetcherCacheKey, Fetcher: CachableFetcher<Key>> FetcherCache<Key, Fetc
     }
     /// Returns the location where the file/directory for `key` is stored, fetching it if
     /// necessary.
-    // #[instrument(level = Level::TRACE, skip_all, fields(key=key.as_key()))]
     pub fn get(
         &self,
         key: Key,
@@ -306,7 +307,7 @@ impl<Key: FetcherCacheKey, Fetcher: CachableFetcher<Key>> FetcherCache<Key, Fetc
     }
     /// Removes cache entry that have not been used for some time.
     #[instrument(level = Level::TRACE, skip_all)]
-    pub async fn cleanup(&self) -> anyhow::Result<()> {
+    async fn cleanup(&self) -> anyhow::Result<()> {
         let dir = self.root_dir.join(CACHE);
         let mut dirfd = tokio::fs::read_dir(&dir)
             .await
@@ -374,6 +375,18 @@ impl<Key: FetcherCacheKey, Fetcher: CachableFetcher<Key>> FetcherCache<Key, Fetc
             drop(write_lock);
         }
         Ok(())
+    }
+
+    /// Spawns a task that periodically removes unused cached paths
+    pub fn spawn_cleanup_task(self: Arc<Self>) {
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(2 * self.expiration).await;
+                if let Err(e) = self.cleanup().await {
+                    tracing::warn!("failed to cleanup: {e}");
+                }
+            }
+        });
     }
 }
 
@@ -545,7 +558,6 @@ mod tests {
                 "cleanup".to_string()
             }
         };
-        // let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = String> + Send>>>::new();
         let mut futures = tokio::task::JoinSet::new();
         for i in 0..100 {
             futures.spawn(fetch_and_use(format!("key{}", i % 4)));
@@ -555,5 +567,37 @@ mod tests {
             // do nothing
             tracing::debug!("{} done", description.unwrap());
         }
+    }
+
+    #[tokio::test]
+    async fn spawn_cleanup_task() {
+        setup_logging();
+
+        let t = tempdir().unwrap();
+        let fetcher = Arc::new(CountingFetcher::new());
+        let cache = Arc::new(
+            FetcherCache::new(t.path().into(), fetcher.clone(), Duration::from_millis(1))
+                .await
+                .unwrap(),
+        );
+
+        cache.clone().spawn_cleanup_task();
+
+        tracing::info!("fetching key first");
+        let first = cache.get("key".into()).await.unwrap().unwrap();
+        assert_eq!(fetcher.get(), 1);
+        assert_eq!(std::fs::read_to_string(first.as_ref()).unwrap(), "1");
+
+        let first_path = first.as_ref().to_owned();
+        drop(first);
+        tracing::info!("waiting for cleanup");
+        // apparently it takes time for the task to actually spawn so let's have some margin
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!first_path.exists());
+
+        tracing::info!("fetching key second");
+        let second = cache.get("key".into()).await.unwrap().unwrap();
+        assert_eq!(fetcher.get(), 2);
+        assert_eq!(std::fs::read_to_string(second.as_ref()).unwrap(), "2");
     }
 }

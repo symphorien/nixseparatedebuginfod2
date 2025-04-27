@@ -122,6 +122,7 @@ pub async fn run_server(args: Options) -> anyhow::Result<()> {
             Debuginfod::new(PathBuf::from(&args.cache_dir), substituter, args.expiration).await?,
         ),
     };
+    state.debuginfod.spawn_cleanup_task();
     let app = Router::new()
         .route("/buildid/{buildid}/section/{section}", get(get_section))
         .route("/buildid/{buildid}/source/{*path}", get(get_source))
