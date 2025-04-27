@@ -12,7 +12,7 @@ use std::{
 };
 
 use anyhow::Context;
-use async_lock::{RwLock, RwLockReadGuardArc, RwLockWriteGuardArc};
+use async_lock::{RwLock, RwLockReadGuardArc, RwLockUpgradableReadGuardArc, RwLockWriteGuardArc};
 use tracing::{instrument, Instrument, Level};
 use weak_table::WeakValueHashMap;
 
@@ -35,19 +35,42 @@ pub trait FetcherCacheKey: Debug + Send + Sync {
     fn as_key(&self) -> &str;
 }
 
-/// While this stucture is not dropped, the directory for this cache key may not be modified.
-struct ReadLockedCacheEntry<Key: FetcherCacheKey> {
+struct LockedCacheEntry<Key: FetcherCacheKey, Lock> {
     pub key: Key,
     pub target: PathBuf,
-    lock: RwLockReadGuardArc<()>,
+    lock: Lock,
 }
+
+impl<Key: FetcherCacheKey, Lock> LockedCacheEntry<Key, Lock> {
+    async fn map<NewLock, Fut: Future<Output = NewLock> + Send, F: FnOnce(Lock) -> Fut>(
+        self,
+        f: F,
+    ) -> LockedCacheEntry<Key, NewLock> {
+        let LockedCacheEntry { key, target, lock } = self;
+        LockedCacheEntry {
+            key,
+            target,
+            lock: f(lock).await,
+        }
+    }
+    fn map_sync<NewLock, F: FnOnce(Lock) -> NewLock>(self, f: F) -> LockedCacheEntry<Key, NewLock> {
+        let LockedCacheEntry { key, target, lock } = self;
+        LockedCacheEntry {
+            key,
+            target,
+            lock: f(lock),
+        }
+    }
+}
+
+/// While this stucture is not dropped, the directory for this cache key may not be modified.
+type ReadLockedCacheEntry<Key> = LockedCacheEntry<Key, RwLockReadGuardArc<()>>;
+
+/// While this stucture is not dropped, the directory for this cache key may not be modified.
+type UpgradableReadLockedCacheEntry<Key> = LockedCacheEntry<Key, RwLockUpgradableReadGuardArc<()>>;
 /// While this structure is not dropped, only the owner may modify the directory corresponding to
 /// this key.
-struct WriteLockedCacheEntry<Key: FetcherCacheKey> {
-    pub key: Key,
-    pub target: PathBuf,
-    lock: RwLockWriteGuardArc<()>,
-}
+type WriteLockedCacheEntry<Key> = LockedCacheEntry<Key, RwLockWriteGuardArc<()>>;
 
 /// A function that can be cached with [`FetcherCache`].
 pub trait CachableFetcher<Key: FetcherCacheKey>: Send + Sync {
@@ -156,66 +179,50 @@ impl<Key: FetcherCacheKey, Fetcher: CachableFetcher<Key>> FetcherCache<Key, Fetc
         let lock = entry_lock.read_arc().await;
         ReadLockedCacheEntry { key, target, lock }
     }
+    #[instrument(level = Level::TRACE, skip_all, fields(key=lock.key.as_key()))]
+    async fn unlock_and_relock_upgradably(
+        &self,
+        lock: ReadLockedCacheEntry<Key>,
+    ) -> UpgradableReadLockedCacheEntry<Key> {
+        let LockedCacheEntry { key, target, lock } = lock;
+        drop(lock);
+        let entry_lock = self.entry_lock(key.as_key()).await;
+        let lock = entry_lock.upgradable_read_arc().await;
+        UpgradableReadLockedCacheEntry { key, target, lock }
+    }
+    #[instrument(level = Level::TRACE, skip_all, fields(key=lock.key.as_key()))]
+    async fn upgrade_upgradeable_read_lock(
+        &self,
+        lock: UpgradableReadLockedCacheEntry<Key>,
+    ) -> WriteLockedCacheEntry<Key> {
+        lock.map(RwLockUpgradableReadGuardArc::upgrade).await
+    }
+    #[instrument(level = Level::TRACE, skip_all, fields(key=lock.key.as_key()))]
+    fn downgrade_write_lock(&self, lock: WriteLockedCacheEntry<Key>) -> ReadLockedCacheEntry<Key> {
+        lock.map_sync(RwLockWriteGuardArc::downgrade)
+    }
+    #[instrument(level = Level::TRACE, skip_all, fields(key=lock.key.as_key()))]
+    fn downgrade_upgradeable_read_lock(
+        &self,
+        lock: UpgradableReadLockedCacheEntry<Key>,
+    ) -> ReadLockedCacheEntry<Key> {
+        lock.map_sync(RwLockUpgradableReadGuardArc::downgrade)
+    }
+
     #[instrument(level = Level::TRACE, skip(self))]
     async fn try_write_lock<'a, 'b>(&'a self, key: &'b str) -> Option<RwLockWriteGuardArc<()>> {
         let entry_lock = self.entry_lock(key).await;
 
         entry_lock.try_write_arc()
     }
-    #[instrument(level = Level::TRACE, skip_all, fields(key=read_lock.key.as_key()))]
-    async fn upgrade<'a>(
-        &'a self,
-        read_lock: ReadLockedCacheEntry<Key>,
-    ) -> WriteLockedCacheEntry<Key> {
-        let entry_lock = self.entry_lock(read_lock.key.as_key()).await;
-        let upgradeable_read_lock = entry_lock.upgradable_read_arc().await;
-        let ReadLockedCacheEntry {
-            target,
-            key,
-            lock: read_lock,
-        } = read_lock;
-        // at this point, even if we drop the read_lock, nobody can remove the directory,
-        // because upgradeable_read_lock exists
-        drop(read_lock);
-        let write_lock =
-            async_lock::RwLockUpgradableReadGuardArc::<()>::upgrade(upgradeable_read_lock).await;
-        WriteLockedCacheEntry {
-            key,
-            target,
-            lock: write_lock,
-        }
-    }
-    #[instrument(level = Level::TRACE, skip_all, fields(key=write_lock.key.as_key()))]
-    async fn downgrade<'a>(
-        &'a self,
-        write_lock: WriteLockedCacheEntry<Key>,
-    ) -> ReadLockedCacheEntry<Key> {
-        let entry_lock = self.entry_lock(write_lock.key.as_key()).await;
-        let WriteLockedCacheEntry {
-            target,
-            key,
-            lock: write_lock,
-        } = write_lock;
-        let upgradeable_read_lock = RwLockWriteGuardArc::downgrade_to_upgradable(write_lock);
-        // at this point taking a new normal read lock is not a dead lock
-        let read_lock = entry_lock.read_arc().await;
-        // now we can drop the upgradeable_read_lock while ensuring that the directory always
-        // exists
-        drop(upgradeable_read_lock);
-        ReadLockedCacheEntry {
-            key,
-            target,
-            lock: read_lock,
-        }
-    }
     /// returns the corresponding directory if it is still in cache
     ///
     /// updates its mtime to remember that it was used, if it is older than some proportion of the cache expiry
     /// time.
     #[instrument(level = Level::TRACE, skip_all, fields(key=key.key.as_key()))]
-    async fn cached<'cache, 'key>(
+    async fn cached<'cache, 'key, Lock>(
         &'cache self,
-        key: &'key ReadLockedCacheEntry<Key>,
+        key: &'key LockedCacheEntry<Key, Lock>,
     ) -> anyhow::Result<Option<PathBuf>> {
         let expiration = self.expiration;
         match tokio::fs::metadata(&key.target).await {
@@ -277,9 +284,20 @@ impl<Key: FetcherCacheKey, Fetcher: CachableFetcher<Key>> FetcherCache<Key, Fetc
             let (lock, result) = match self.cached(&lock).await? {
                 Some(cached) => (lock, Some(cached)),
                 None => {
-                    let write_lock = self.upgrade(lock).await;
-                    let result = self.fetch(&write_lock).await?;
-                    (self.downgrade(write_lock).await, result)
+                    let upgrade_lock = self.unlock_and_relock_upgradably(lock).await;
+                    // somebody may have taken the lock and fetched the cache in between so we have
+                    // to recheck
+                    match self.cached(&upgrade_lock).await? {
+                        Some(cached) => (
+                            self.downgrade_upgradeable_read_lock(upgrade_lock),
+                            Some(cached),
+                        ),
+                        None => {
+                            let write_lock = self.upgrade_upgradeable_read_lock(upgrade_lock).await;
+                            let result = self.fetch(&write_lock).await?;
+                            (self.downgrade_write_lock(write_lock), result)
+                        }
+                    }
                 }
             };
             Ok(result.map(|path| CachedPath::new(path, lock)))
@@ -529,7 +547,7 @@ mod tests {
         };
         // let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = String> + Send>>>::new();
         let mut futures = tokio::task::JoinSet::new();
-        for i in 0..6 {
+        for i in 0..100 {
             futures.spawn(fetch_and_use(format!("key{}", i % 4)));
             futures.spawn(cleanup());
         }
