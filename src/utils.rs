@@ -1,7 +1,7 @@
 //! Misc utils
-use std::fmt::Debug;
 use std::path::Path;
 use std::pin::pin;
+use std::{fmt::Debug, time::SystemTime};
 
 use async_compression::tokio::bufread::{XzDecoder, ZstdDecoder};
 use pin_project::pin_project;
@@ -15,6 +15,29 @@ pub enum Presence {
     Found,
     /// No the substituter does not have this file or directory
     NotFound,
+}
+
+/// Sets the mtime of this path to current time
+///
+/// the path must exist.
+pub async fn touch(path: &Path) -> std::io::Result<()> {
+    let std_file = std::fs::File::open(path)?;
+    tokio::task::spawn_blocking(move || std_file.set_modified(SystemTime::now())).await?
+}
+
+#[tokio::test]
+async fn test_touch() {
+    let d = tempfile::tempdir().unwrap();
+    let f = d.path().join("file");
+    std::fs::write(&f, "contents").unwrap();
+    let mtime_before = f.metadata().unwrap().modified().unwrap();
+    let time1 = SystemTime::now();
+    touch(&f).await.unwrap();
+    let time2 = SystemTime::now();
+    let mtime_after = f.metadata().unwrap().modified().unwrap();
+    assert!(mtime_before <= time1);
+    assert!(time1 <= mtime_after);
+    assert!(mtime_after <= time2);
 }
 
 /// Ensure that `path` does not exists.

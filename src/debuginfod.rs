@@ -3,6 +3,7 @@ use std::{
     ops::Deref,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 
 use anyhow::Context;
@@ -72,7 +73,13 @@ async fn ensure_dir_exists(path: &Path) -> anyhow::Result<()> {
 impl Debuginfod {
     /// Create a [`Debuginfod`] instance which fetches debug symbols from `substituter` and stores
     /// cached files into `cache_path`.
-    pub async fn new(cache_path: PathBuf, substituter: BoxedSubstituter) -> anyhow::Result<Self> {
+    ///
+    /// `duration` is an indication of how long a cached but unread path must be kept
+    pub async fn new(
+        cache_path: PathBuf,
+        substituter: BoxedSubstituter,
+        expiration: Duration,
+    ) -> anyhow::Result<Self> {
         ensure_dir_exists(&cache_path).await?;
         let debuginfo_path = cache_path.join("debuginfo");
         let store_path = cache_path.join("store");
@@ -80,8 +87,9 @@ impl Debuginfod {
         ensure_dir_exists(&store_path).await?;
         let substituter = Arc::new(substituter);
         Ok(Self {
-            debuginfo_fetcher: FetcherCache::new(debuginfo_path, substituter.clone()).await?,
-            store_fetcher: FetcherCache::new(store_path, substituter.clone()).await?,
+            debuginfo_fetcher: FetcherCache::new(debuginfo_path, substituter.clone(), expiration)
+                .await?,
+            store_fetcher: FetcherCache::new(store_path, substituter.clone(), expiration).await?,
         })
     }
     /// Returns the path to ELF object with debug symbols for this build id.
@@ -182,6 +190,8 @@ impl Debuginfod {
 
 #[cfg(test)]
 mod test {
+    use std::time::Duration;
+
     use tempfile::tempdir;
 
     use crate::{
@@ -196,9 +206,13 @@ mod test {
         setup_logging();
         let t = tempdir().unwrap();
         let substituter = FileSubstituter::test_fixture();
-        let debuginfod = Debuginfod::new(t.path().into(), Box::new(substituter))
-            .await
-            .unwrap();
+        let debuginfod = Debuginfod::new(
+            t.path().into(),
+            Box::new(substituter),
+            Duration::from_secs(1000),
+        )
+        .await
+        .unwrap();
         // /nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/bin/make
         let debuginfo = debuginfod
             .debuginfo(&BuildId::new("66b33fee92bf535e40d29622ce45b4bd01bebc1f").unwrap())
@@ -217,9 +231,13 @@ mod test {
         setup_logging();
         let t = tempdir().unwrap();
         let substituter = FileSubstituter::test_fixture();
-        let debuginfod = Debuginfod::new(t.path().into(), Box::new(substituter))
-            .await
-            .unwrap();
+        let debuginfod = Debuginfod::new(
+            t.path().into(),
+            Box::new(substituter),
+            Duration::from_secs(1000),
+        )
+        .await
+        .unwrap();
         // /nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/bin/make
         let buildid = BuildId::new("66b33fee92bf535e40d29622ce45b4bd01bebc1f").unwrap();
         let executable = debuginfod.executable(&buildid).await.unwrap().unwrap();

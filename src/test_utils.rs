@@ -2,8 +2,12 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Once;
+use tracing::Level;
+use tracing_subscriber::filter;
+use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer;
 
 /// Returns the sha256sum of this file in a lowecase hex string
 pub fn file_sha256(path: &Path) -> String {
@@ -31,8 +35,35 @@ static SETUP_LOGGING: Once = Once::new();
 /// Tests calling this function will have tracing log in a way compatible with cargo test.
 pub fn setup_logging() {
     SETUP_LOGGING.call_once(|| {
-        let fmt_layer = tracing_subscriber::fmt::layer().with_test_writer();
-        tracing_subscriber::registry().with(fmt_layer).init();
+        let filter = filter::Targets::new()
+            .with_target("runtime", Level::DEBUG)
+            .with_target("tokio", Level::DEBUG)
+            .with_default(Level::TRACE);
+
+        let fmt_layer = tracing_subscriber::fmt::layer()
+            .with_test_writer()
+            .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+            .with_filter(filter);
+
+        let registry = tracing_subscriber::registry().with(fmt_layer);
+
+        #[cfg(feature = "tokio-console")]
+        let registry = registry.with(console_subscriber::spawn());
+
+        #[cfg(feature = "tracing-chrome")]
+        let (chrome_layer, guard) = tracing_chrome::ChromeLayerBuilder::new().build();
+        #[cfg(feature = "tracing-chrome")]
+        let registry = registry.with(chrome_layer);
+        #[cfg(feature = "tracing-chrome")]
+        {
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                eprintln!("writing chrome trace, visualize it at https://ui.perfetto.dev/");
+                drop(guard);
+            });
+        }
+
+        registry.init();
     });
 }
 

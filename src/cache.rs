@@ -8,13 +8,15 @@ use std::{
     marker::PhantomData,
     path::{Path, PathBuf},
     sync::{Arc, Weak},
+    time::Duration,
 };
 
 use anyhow::Context;
 use async_lock::{RwLock, RwLockReadGuardArc, RwLockWriteGuardArc};
+use tracing::{instrument, Instrument, Level};
 use weak_table::WeakValueHashMap;
 
-use crate::utils::{remove_recursively_if_exists, Presence};
+use crate::utils::{remove_recursively_if_exists, touch, Presence};
 
 /// Fetchers are called to writer in a directory there.
 ///
@@ -97,6 +99,7 @@ pub struct FetcherCache<Key: FetcherCacheKey, Fetcher: CachableFetcher<Key>> {
     fetcher: Fetcher,
     phantom_key: PhantomData<Key>,
     locks: tokio::sync::Mutex<WeakValueHashMap<String, Weak<RwLock<()>>>>,
+    expiration: Duration,
 }
 
 impl<Key: FetcherCacheKey, Fetcher: CachableFetcher<Key>> FetcherCache<Key, Fetcher> {
@@ -111,143 +114,165 @@ impl<Key: FetcherCacheKey, Fetcher: CachableFetcher<Key>> FetcherCache<Key, Fetc
     }
 
     /// Create a [`FetcherCache`] that stores fetched directories under `root_dir`.
-    pub async fn new(root_dir: PathBuf, fetcher: Fetcher) -> anyhow::Result<Self> {
+    ///
+    /// `expiration` is the order of magnitude of how recently a file must have been requested by [`FetcherCache::get`] to not be deleted by [`FetcherCache::cleanup`].
+    pub async fn new(
+        root_dir: PathBuf,
+        fetcher: Fetcher,
+        expiration: Duration,
+    ) -> anyhow::Result<Self> {
         let cache = Self {
             root_dir,
             fetcher,
             phantom_key: PhantomData::default(),
             locks: Default::default(),
+            expiration,
         };
         cache.ensure_dir_exists(PARTIAL).await?;
         cache.ensure_dir_exists(CACHE).await?;
         Ok(cache)
     }
-    async fn entry_lock(&self, key: &Key) -> Arc<RwLock<()>> {
-        let actual_key = key.as_key();
+    #[instrument(level = Level::TRACE, skip(self))]
+    async fn entry_lock(&self, key: &str) -> Arc<RwLock<()>> {
         let mut lock_map = self.locks.lock().await;
         lock_map.remove_expired();
-        let current = lock_map.get(actual_key);
-        match current {
+        let current = lock_map.get(key);
+        let result = match current {
             Some(entry_lock) => entry_lock,
             None => {
                 let entry_lock = Arc::new(RwLock::new(()));
-                lock_map.insert(actual_key.to_owned(), entry_lock.clone());
+                lock_map.insert(key.to_owned(), entry_lock.clone());
                 entry_lock
             }
-        }
+        };
+        drop(lock_map);
+        result
     }
-    fn read_lock<'a>(
-        &'a self,
-        key: Key,
-    ) -> impl Future<Output = ReadLockedCacheEntry<Key>> + Send + use<'a, Key, Fetcher> {
-        async move {
-            let actual_key = key.as_key();
-            let target = self.root_dir.join(CACHE).join(&actual_key);
-            let entry_lock = self.entry_lock(&key).await;
-            let lock = entry_lock.read_arc().await;
-            ReadLockedCacheEntry { key, target, lock }
-        }
+    #[instrument(level = Level::TRACE, skip_all, fields(key=key.as_key()))]
+    async fn read_lock<'a>(&'a self, key: Key) -> ReadLockedCacheEntry<Key> {
+        let actual_key = key.as_key();
+        let target = self.root_dir.join(CACHE).join(actual_key);
+        let entry_lock = self.entry_lock(actual_key).await;
+        let lock = entry_lock.read_arc().await;
+        ReadLockedCacheEntry { key, target, lock }
     }
-    fn upgrade<'a>(
+    #[instrument(level = Level::TRACE, skip(self))]
+    async fn try_write_lock<'a, 'b>(&'a self, key: &'b str) -> Option<RwLockWriteGuardArc<()>> {
+        let entry_lock = self.entry_lock(key).await;
+
+        entry_lock.try_write_arc()
+    }
+    #[instrument(level = Level::TRACE, skip_all, fields(key=read_lock.key.as_key()))]
+    async fn upgrade<'a>(
         &'a self,
         read_lock: ReadLockedCacheEntry<Key>,
-    ) -> impl Future<Output = WriteLockedCacheEntry<Key>> + Send + use<'a, Key, Fetcher> {
-        async move {
-            let entry_lock = self.entry_lock(&read_lock.key).await;
-            let upgradeable_read_lock = entry_lock.upgradable_read_arc().await;
-            let ReadLockedCacheEntry {
-                target,
-                key,
-                lock: read_lock,
-            } = read_lock;
-            // at this point, even if we drop the read_lock, nobody can remove the directory,
-            // because upgradeable_read_lock exists
-            drop(read_lock);
-            let write_lock =
-                async_lock::RwLockUpgradableReadGuardArc::<()>::upgrade(upgradeable_read_lock)
-                    .await;
-            WriteLockedCacheEntry {
-                key,
-                target,
-                lock: write_lock,
-            }
+    ) -> WriteLockedCacheEntry<Key> {
+        let entry_lock = self.entry_lock(read_lock.key.as_key()).await;
+        let upgradeable_read_lock = entry_lock.upgradable_read_arc().await;
+        let ReadLockedCacheEntry {
+            target,
+            key,
+            lock: read_lock,
+        } = read_lock;
+        // at this point, even if we drop the read_lock, nobody can remove the directory,
+        // because upgradeable_read_lock exists
+        drop(read_lock);
+        let write_lock =
+            async_lock::RwLockUpgradableReadGuardArc::<()>::upgrade(upgradeable_read_lock).await;
+        WriteLockedCacheEntry {
+            key,
+            target,
+            lock: write_lock,
         }
     }
-    fn downgrade<'a>(
+    #[instrument(level = Level::TRACE, skip_all, fields(key=write_lock.key.as_key()))]
+    async fn downgrade<'a>(
         &'a self,
         write_lock: WriteLockedCacheEntry<Key>,
-    ) -> impl Future<Output = ReadLockedCacheEntry<Key>> + Send + use<'a, Fetcher, Key> {
-        async move {
-            let entry_lock = self.entry_lock(&write_lock.key).await;
-            let WriteLockedCacheEntry {
-                target,
-                key,
-                lock: write_lock,
-            } = write_lock;
-            let upgradeable_read_lock = RwLockWriteGuardArc::downgrade_to_upgradable(write_lock);
-            // at this point taking a new normal read lock is not a dead lock
-            let read_lock = entry_lock.read_arc().await;
-            // now we can drop the upgradeable_read_lock while ensuring that the directory always
-            // exists
-            drop(upgradeable_read_lock);
-            ReadLockedCacheEntry {
-                key,
-                target,
-                lock: read_lock,
-            }
+    ) -> ReadLockedCacheEntry<Key> {
+        let entry_lock = self.entry_lock(write_lock.key.as_key()).await;
+        let WriteLockedCacheEntry {
+            target,
+            key,
+            lock: write_lock,
+        } = write_lock;
+        let upgradeable_read_lock = RwLockWriteGuardArc::downgrade_to_upgradable(write_lock);
+        // at this point taking a new normal read lock is not a dead lock
+        let read_lock = entry_lock.read_arc().await;
+        // now we can drop the upgradeable_read_lock while ensuring that the directory always
+        // exists
+        drop(upgradeable_read_lock);
+        ReadLockedCacheEntry {
+            key,
+            target,
+            lock: read_lock,
         }
     }
     /// returns the corresponding directory if it is still in cache
-    fn cached<'cache, 'key>(
+    ///
+    /// updates its mtime to remember that it was used, if it is older than some proportion of the cache expiry
+    /// time.
+    #[instrument(level = Level::TRACE, skip_all, fields(key=key.key.as_key()))]
+    async fn cached<'cache, 'key>(
         &'cache self,
         key: &'key ReadLockedCacheEntry<Key>,
-    ) -> impl Future<Output = anyhow::Result<Option<PathBuf>>> + Send + 'key {
-        async move {
-            if tokio::fs::try_exists(&key.target)
-                .await
-                .with_context(|| format!("stat({})", key.target.display()))?
-            {
-                Ok(Some((&key.target).into()))
-            } else {
-                Ok(None)
+    ) -> anyhow::Result<Option<PathBuf>> {
+        let expiration = self.expiration;
+        match tokio::fs::metadata(&key.target).await {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e).context(format!("stat({})", key.target.display())),
+            Ok(metadata) => {
+                if metadata
+                    .modified()
+                    .context("no mtime on this platform")?
+                    .elapsed()
+                    .map(|x| x > expiration / 2)
+                    .unwrap_or(true)
+                {
+                    touch(&key.target)
+                        .await
+                        .with_context(|| format!("touch({})", key.target.display()))?;
+                }
+                Ok(Some(key.target.clone()))
             }
         }
     }
     /// when the corresponding directory is not in cache, put it there
-    fn fetch<'key, 'cache: 'key>(
+    #[instrument(level = Level::TRACE, skip_all, fields(key=key.key.as_key()))]
+    async fn fetch<'key, 'cache: 'key>(
         &'cache self,
         key: &'key WriteLockedCacheEntry<Key>,
-    ) -> impl Future<Output = anyhow::Result<Option<PathBuf>>> + Send + 'key {
-        async move {
-            let partial_dir = self.root_dir.join(PARTIAL).join(key.key.as_key());
-            // we always clean after us, unless the future stops being polled
-            remove_recursively_if_exists(&partial_dir).await?;
-            let result = match self.fetcher.fetch(&key.key, &partial_dir).await {
-                Ok(Presence::Found) => tokio::fs::rename(&partial_dir, &key.target)
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "renaming {} to {}",
-                            partial_dir.display(),
-                            key.target.display()
-                        )
-                    })
-                    .map(|()| Some(key.target.clone())),
-                Ok(Presence::NotFound) => Ok(None),
-                Err(e) => Err(e),
-            };
-            remove_recursively_if_exists(&partial_dir).await?;
-            result
-        }
+    ) -> anyhow::Result<Option<PathBuf>> {
+        let partial_dir = self.root_dir.join(PARTIAL).join(key.key.as_key());
+        // we always clean after us, unless the future stops being polled
+        remove_recursively_if_exists(&partial_dir).await?;
+        let result = match self.fetcher.fetch(&key.key, &partial_dir).await {
+            Ok(Presence::Found) => tokio::fs::rename(&partial_dir, &key.target)
+                .await
+                .with_context(|| {
+                    format!(
+                        "renaming {} to {}",
+                        partial_dir.display(),
+                        key.target.display()
+                    )
+                })
+                .map(|()| Some(key.target.clone())),
+            Ok(Presence::NotFound) => Ok(None),
+            Err(e) => Err(e),
+        };
+        remove_recursively_if_exists(&partial_dir).await?;
+        result
     }
     /// Returns the location where the file/directory for `key` is stored, fetching it if
     /// necessary.
+    // #[instrument(level = Level::TRACE, skip_all, fields(key=key.as_key()))]
     pub fn get(
         &self,
         key: Key,
     ) -> impl Future<Output = anyhow::Result<Option<CachedPath<Key>>>> + Send + use<'_, Key, Fetcher>
     {
-        async move {
+        let span = tracing::trace_span!("get", key = key.as_key());
+        let future = async move {
             let lock = self.read_lock(key).await;
             let (lock, result) = match self.cached(&lock).await? {
                 Some(cached) => (lock, Some(cached)),
@@ -258,12 +283,259 @@ impl<Key: FetcherCacheKey, Fetcher: CachableFetcher<Key>> FetcherCache<Key, Fetc
                 }
             };
             Ok(result.map(|path| CachedPath::new(path, lock)))
+        };
+        future.instrument(span)
+    }
+    /// Removes cache entry that have not been used for some time.
+    #[instrument(level = Level::TRACE, skip_all)]
+    pub async fn cleanup(&self) -> anyhow::Result<()> {
+        let dir = self.root_dir.join(CACHE);
+        let mut dirfd = tokio::fs::read_dir(&dir)
+            .await
+            .with_context(|| format!("listing {} for cleanup", dir.display()))?;
+        loop {
+            let entry = match dirfd.next_entry().await {
+                Err(e) => {
+                    tracing::warn!(
+                        "cannot cleanup {}: failed to list entry: {e}",
+                        dir.display()
+                    );
+                    continue;
+                }
+                Ok(None) => break,
+                Ok(Some(entry)) => entry,
+            };
+            let entry_name = entry.file_name();
+            let Some(entry_name) = entry_name.to_str() else {
+                tracing::warn!(
+                    "unexpected non utf8 file {} in {}",
+                    entry_name.to_string_lossy(),
+                    dir.display()
+                );
+                continue;
+            };
+            let entry_path = entry.path();
+            tracing::trace!("attempting to cleanup {}", entry_path.display());
+            let Some(write_lock) = self.try_write_lock(entry_name).await else {
+                tracing::trace!(
+                    "not cleaning up {} because somebody has a lock on it",
+                    entry_path.display()
+                );
+                continue;
+            };
+            match entry.metadata().await {
+                // did some concurrent cleanup remove it ?
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => {
+                    tracing::warn!("cannot cleanup {}: {}", entry_path.display(), e);
+                    continue;
+                }
+                Ok(m) => {
+                    let mtime = m.modified().context("mtime not supported on this os")?;
+                    if mtime
+                        .elapsed()
+                        .map(|x| x > self.expiration * 2)
+                        .unwrap_or(false)
+                    {
+                        tracing::debug!("removing expired cache entry {}", entry_path.display());
+                        if let Err(e) = remove_recursively_if_exists(&entry_path).await {
+                            tracing::warn!(
+                                "failed to remove expired cache {}: {e}",
+                                entry_path.display()
+                            );
+                        }
+                    } else {
+                        tracing::trace!(
+                            "not cleaning up {} because it was used recently enough",
+                            entry_path.display()
+                        );
+                    }
+                }
+            }
+            // release write lock
+            drop(write_lock);
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicU32;
+
+    use tempfile::tempdir;
+
+    use crate::test_utils::setup_logging;
+
+    use super::*;
+
+    struct CountingFetcher(AtomicU32);
+    impl CountingFetcher {
+        fn new() -> Self {
+            CountingFetcher(AtomicU32::new(0))
+        }
+        fn get(&self) -> u32 {
+            self.0.load(std::sync::atomic::Ordering::SeqCst)
         }
     }
-    #[allow(unused)]
-    /// Removes cache entry that have not been used for some time.
-    async fn cleanup(&self) {
-        // FIXME: actually implement cleanup
-        todo!();
+    impl FetcherCacheKey for String {
+        fn as_key(&self) -> &str {
+            self
+        }
+    }
+    impl<T: AsRef<CountingFetcher> + Send + Sync> CachableFetcher<String> for T {
+        fn fetch<'a>(
+            &'a self,
+            key: &'a String,
+            into: &'a Path,
+        ) -> impl Future<Output = anyhow::Result<Presence>> + Send {
+            async move {
+                let value = self
+                    .as_ref()
+                    .0
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                    + 1;
+                tracing::info!(
+                    "Running counting fetcher on key {key}, count incremented to {value}"
+                );
+                tokio::fs::write(&into, format!("{}", value)).await?;
+                Ok(Presence::Found)
+            }
+        }
+    }
+    #[tokio::test]
+    async fn does_not_fetch_twice() {
+        let t = tempdir().unwrap();
+        let fetcher = Arc::new(CountingFetcher::new());
+        let cache = FetcherCache::new(t.path().into(), fetcher.clone(), Duration::from_secs(1000))
+            .await
+            .unwrap();
+        let first = cache.get("key".into()).await.unwrap().unwrap();
+        assert_eq!(fetcher.get(), 1);
+        assert_eq!(std::fs::read_to_string(first.as_ref()).unwrap(), "1");
+        let second = cache.get("key".into()).await.unwrap().unwrap();
+        assert_eq!(fetcher.get(), 1);
+        assert_eq!(std::fs::read_to_string(second.as_ref()).unwrap(), "1");
+        assert_eq!(first.as_ref(), second.as_ref());
+    }
+
+    #[tokio::test]
+    async fn cleanup_expired() {
+        setup_logging();
+
+        let t = tempdir().unwrap();
+        let fetcher = Arc::new(CountingFetcher::new());
+        let cache = FetcherCache::new(t.path().into(), fetcher.clone(), Duration::ZERO)
+            .await
+            .unwrap();
+        tracing::info!("fetching key first");
+        let first = cache.get("key".into()).await.unwrap().unwrap();
+        assert_eq!(fetcher.get(), 1);
+        assert_eq!(std::fs::read_to_string(first.as_ref()).unwrap(), "1");
+
+        let first_path = first.as_ref().to_owned();
+        drop(first);
+        tracing::info!("cleaning up");
+        cache.cleanup().await.unwrap();
+        assert!(!first_path.exists());
+
+        tracing::info!("fetching key second");
+        let second = cache.get("key".into()).await.unwrap().unwrap();
+        assert_eq!(fetcher.get(), 2);
+        assert_eq!(std::fs::read_to_string(second.as_ref()).unwrap(), "2");
+    }
+
+    #[tokio::test]
+    async fn cleanup_expired_but_held_lock() {
+        setup_logging();
+
+        let t = tempdir().unwrap();
+        let fetcher = Arc::new(CountingFetcher::new());
+        let cache = FetcherCache::new(t.path().into(), fetcher.clone(), Duration::ZERO)
+            .await
+            .unwrap();
+        tracing::info!("fetching key first");
+        let first = cache.get("key".into()).await.unwrap().unwrap();
+        assert_eq!(fetcher.get(), 1);
+        assert_eq!(std::fs::read_to_string(first.as_ref()).unwrap(), "1");
+
+        tracing::info!("cleaning up");
+        cache.cleanup().await.unwrap();
+        assert!(first.as_ref().exists());
+
+        drop(first);
+
+        tracing::info!("fetching key second");
+        let second = cache.get("key".into()).await.unwrap().unwrap();
+        assert_eq!(fetcher.get(), 1);
+        assert_eq!(std::fs::read_to_string(second.as_ref()).unwrap(), "1");
+    }
+
+    #[tokio::test]
+    async fn cleanup_not_expired() {
+        setup_logging();
+
+        let t = tempdir().unwrap();
+        let fetcher = Arc::new(CountingFetcher::new());
+        let cache = FetcherCache::new(t.path().into(), fetcher.clone(), Duration::from_secs(1000))
+            .await
+            .unwrap();
+        tracing::info!("fetching key first");
+        let first = cache.get("key".into()).await.unwrap().unwrap();
+        assert_eq!(fetcher.get(), 1);
+        assert_eq!(std::fs::read_to_string(first.as_ref()).unwrap(), "1");
+
+        let first_path = first.as_ref().to_owned();
+        drop(first);
+        tracing::info!("cleaning up");
+        cache.cleanup().await.unwrap();
+        assert!(first_path.exists());
+
+        tracing::info!("fetching key second");
+        let second = cache.get("key".into()).await.unwrap().unwrap();
+        assert_eq!(fetcher.get(), 1);
+        assert_eq!(std::fs::read_to_string(second.as_ref()).unwrap(), "1");
+    }
+
+    #[tokio::test]
+    async fn locking() {
+        setup_logging();
+
+        let t = tempdir().unwrap();
+        let fetcher = Arc::new(CountingFetcher::new());
+        let cache = FetcherCache::new(t.path().into(), fetcher.clone(), Duration::from_secs(1000))
+            .await
+            .unwrap();
+        let cache = Arc::new(cache);
+
+        let fetch_and_use = |key: String| {
+            let cache = cache.clone();
+            async move {
+                let description = format!("fetch_and_use({})", key);
+                tracing::info!("starting {}", &description);
+                let path = cache.get(key).await.unwrap().unwrap();
+                tracing::info!("got a result for {}", &description);
+                tokio::fs::metadata(path.as_ref()).await.unwrap();
+                tracing::info!("{} -> {}", &description, path.as_ref().display());
+                description
+            }
+        };
+        let cleanup = || {
+            let cache = cache.clone();
+            async move {
+                cache.cleanup().await.unwrap();
+                "cleanup".to_string()
+            }
+        };
+        // let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = String> + Send>>>::new();
+        let mut futures = tokio::task::JoinSet::new();
+        for i in 0..6 {
+            futures.spawn(fetch_and_use(format!("key{}", i % 4)));
+            futures.spawn(cleanup());
+        }
+        while let Some(description) = futures.join_next().await {
+            // do nothing
+            tracing::debug!("{} done", description.unwrap());
+        }
     }
 }

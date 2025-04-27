@@ -14,7 +14,7 @@
 
 #![warn(missing_docs)]
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use clap::Parser;
 use tracing_subscriber::prelude::*;
@@ -44,6 +44,9 @@ pub struct Options {
     /// Directory where files downloaded from the substituter are stored
     #[arg(short, long, default_value_t = default_cache_directory())]
     cache_dir: String,
+    /// How long a fetched file should be kept in cache. Only a rough indication.
+    #[arg(short, long, value_parser = humantime::parse_duration)]
+    expiration: Duration,
 }
 
 fn default_cache_directory() -> String {
@@ -62,11 +65,15 @@ async fn main() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "nixseparatedebuginfod2=info,tower_http=debug")
     }
     let args = Options::parse();
-    let fmt_layer = tracing_subscriber::fmt::layer().without_time();
-    tracing_subscriber::registry()
-        .with(fmt_layer)
-        .with(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .without_time()
+        .with_filter(tracing_subscriber::EnvFilter::from_default_env());
+    let registry = tracing_subscriber::registry().with(fmt_layer);
+
+    #[cfg(feature = "tokio-console")]
+    let registry = registry.with(console_subscriber::spawn());
+
+    registry.init();
 
     server::run_server(args).await
 }

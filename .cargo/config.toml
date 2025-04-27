@@ -1,0 +1,3 @@
+[build]
+# required for tokio-console
+# rustflags = ["--cfg", "tokio_unstable"]
