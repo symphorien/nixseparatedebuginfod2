@@ -51,9 +51,7 @@ pub struct Debuginfod {
 }
 
 /// Returns the input if this file exists or None if it does not
-async fn return_if_exists<Key: FetcherCacheKey>(
-    path: CachedPath<Key>,
-) -> anyhow::Result<Option<CachedPath<Key>>> {
+async fn return_if_exists(path: CachedPath) -> anyhow::Result<Option<CachedPath>> {
     match path.as_ref().metadata() {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e).context(format!(
@@ -110,7 +108,7 @@ impl Debuginfod {
     pub async fn debuginfo<'key, 'debuginfod: 'key>(
         &'debuginfod self,
         build_id: &'key BuildId,
-    ) -> anyhow::Result<Option<CachedPath<BuildId>>> {
+    ) -> anyhow::Result<Option<CachedPath>> {
         match self.debuginfo_fetcher.get(build_id.clone()).await {
             Ok(Some(nar)) => {
                 let debugfile = nar.join(&build_id.in_debug_output("debug"));
@@ -127,7 +125,7 @@ impl Debuginfod {
     pub async fn executable<'key, 'debuginfod: 'key>(
         &'debuginfod self,
         build_id: &'key BuildId,
-    ) -> anyhow::Result<Option<CachedPath<StorePath>>> {
+    ) -> anyhow::Result<Option<CachedPath>> {
         match self.debuginfo_fetcher.get(build_id.clone()).await {
             Ok(Some(nar)) => {
                 let symlink = nar.join(&build_id.in_debug_output("executable"));
@@ -182,7 +180,7 @@ impl Debuginfod {
         &self,
         _build_id: &BuildId,
         _path: &str,
-    ) -> anyhow::Result<Option<CachedPath<StorePath>>> {
+    ) -> anyhow::Result<Option<CachedPath>> {
         // when gdb attempts to show the source of a function that comes
         // from a header in another library, the request is store path made
         // relative to /

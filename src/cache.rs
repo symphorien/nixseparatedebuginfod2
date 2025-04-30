@@ -90,18 +90,18 @@ pub trait CachableFetcher<Key: FetcherCacheKey>: Send + Sync {
 }
 
 /// Like [`Path`] but ensures that the path is not modified until dropped.
-pub struct CachedPath<Key: FetcherCacheKey> {
+pub struct CachedPath {
     path: PathBuf,
-    lock: ReadLockedCacheEntry<Key>,
+    lock: RwLockReadGuardArc<()>,
 }
 
-impl<Key: FetcherCacheKey> AsRef<Path> for CachedPath<Key> {
+impl AsRef<Path> for CachedPath {
     fn as_ref(&self) -> &Path {
         self.path.as_ref()
     }
 }
 
-impl<Key: FetcherCacheKey> CachedPath<Key> {
+impl CachedPath {
     /// Wrapper around [`Path::join`].
     pub fn join<T: AsRef<Path>>(self, rest: T) -> Self {
         Self {
@@ -110,8 +110,11 @@ impl<Key: FetcherCacheKey> CachedPath<Key> {
         }
     }
 
-    fn new(path: PathBuf, lock: ReadLockedCacheEntry<Key>) -> Self {
-        Self { path, lock }
+    fn new<Key: FetcherCacheKey>(path: PathBuf, lock: ReadLockedCacheEntry<Key>) -> Self {
+        Self {
+            path,
+            lock: lock.lock,
+        }
     }
 }
 
@@ -277,7 +280,7 @@ impl<Key: FetcherCacheKey + 'static, Fetcher: CachableFetcher<Key> + 'static>
     pub fn get(
         &self,
         key: Key,
-    ) -> impl Future<Output = anyhow::Result<Option<CachedPath<Key>>>> + Send + use<'_, Key, Fetcher>
+    ) -> impl Future<Output = anyhow::Result<Option<CachedPath>>> + Send + use<'_, Key, Fetcher>
     {
         let span = tracing::trace_span!("get", key = key.as_key());
         let future = async move {
