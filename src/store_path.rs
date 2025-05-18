@@ -1,18 +1,23 @@
 //! Utils to work with Nix store paths, i.e. `/nix/store/xxx`.
 
 use std::{
-    ffi::{OsStr, OsString},
-    os::unix::ffi::{OsStrExt, OsStringExt as _},
+    ffi::OsStr,
+    os::unix::ffi::{OsStrExt, OsStringExt},
     path::{Path, PathBuf},
 };
 
 const NIX_STORE: &str = "/nix/store";
 const HASH_LEN: usize = 32;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 /// A Nix store path (not necessarily its root)
 ///
 /// Currently it hard codes `/nix/store`. Other store locations are not supported.
+///
+/// A store path upholds the following invariants
+/// - starts with /store/path
+/// - 3rd components starts with HASH_LEN chars, then at least two others (minus and another)
+/// - the HASH_LEN other chars are ascii
 pub struct StorePath(PathBuf);
 
 impl AsRef<Path> for StorePath {
@@ -130,65 +135,44 @@ fn test_store_path_relative_bare_path() {
     .unwrap();
     assert_eq!(path.relative(), Path::new(""));
 }
-/// To remove references, gcc is patched to replace the hash part
-/// of store path by an uppercase version in debug symbols.
-///
-/// Store paths are embedded in debug symbols for example as the location
-/// of template instantiation from libraries that live in other derivations.
-///
-/// This function undoes the mangling.
-pub fn demangle(storepath: PathBuf) -> PathBuf {
-    if !storepath.starts_with(NIX_STORE) {
-        return storepath;
+
+impl StorePath {
+    /// To remove references, gcc is patched to replace the hash part
+    /// of store path by an uppercase version in debug symbols.
+    ///
+    /// Store paths are embedded in debug symbols for example as the location
+    /// of template instantiation from libraries that live in other derivations.
+    ///
+    /// This function undoes the mangling.
+    pub fn demangle(self) -> StorePath {
+        let mut as_bytes = self.0.into_os_string().into_vec();
+        let len = as_bytes.len();
+        let store_len = NIX_STORE.as_bytes().len();
+        as_bytes[len.min(store_len + 1)..len.min(store_len + 1 + HASH_LEN)].make_ascii_lowercase();
+        StorePath::new(OsStr::from_bytes(&as_bytes).as_ref()).unwrap()
     }
-    let mut as_bytes = storepath.into_os_string().into_vec();
-    let len = as_bytes.len();
-    let store_len = NIX_STORE.as_bytes().len();
-    as_bytes[len.min(store_len + 1)..len.min(store_len + 1 + 32)].make_ascii_lowercase();
-    OsString::from_vec(as_bytes).into()
 }
 
 #[test]
 fn test_demangle_nominal() {
     assert_eq!(
-        demangle(PathBuf::from(
+        StorePath::new(Path::new(
             "/nix/store/JW65XNML1FGF4BFGZGISZCK3LFJWXG6L-GCC-12.3.0/include/c++/12.3.0/bits/vector.tcc"
-        )),
-        PathBuf::from(
+        )).unwrap().demangle(),
+        StorePath::new(Path::new(
             "/nix/store/jw65xnml1fgf4bfgzgiszck3lfjwxg6l-GCC-12.3.0/include/c++/12.3.0/bits/vector.tcc"
-        )
+        )).unwrap()
     );
 }
 
 #[test]
 fn test_demangle_noop() {
     assert_eq!(
-        demangle(PathBuf::from(
+        StorePath::new(Path::new(
             "/nix/store/jw65xnml1fgf4bfgzgiszck3lfjwxg6l-gcc-12.3.0/include/c++/12.3.0/bits/vector.tcc"
-        )),
-        PathBuf::from(
+        )).unwrap().demangle(),
+        StorePath::new(Path::new(
             "/nix/store/jw65xnml1fgf4bfgzgiszck3lfjwxg6l-gcc-12.3.0/include/c++/12.3.0/bits/vector.tcc"
-        )
-    );
-}
-
-#[test]
-fn test_demangle_empty() {
-    assert_eq!(demangle(PathBuf::from("/")), PathBuf::from("/"));
-}
-
-#[test]
-fn test_demangle_incomplete() {
-    assert_eq!(
-        demangle(PathBuf::from("/nix/store/JW65XNML1FGF4B")),
-        PathBuf::from("/nix/store/jw65xnml1fgf4b")
-    );
-}
-
-#[test]
-fn test_demangle_non_storepath() {
-    assert_eq!(
-        demangle(PathBuf::from("/build/src/FOO.C")),
-        PathBuf::from("/build/src/FOO.C")
+        )).unwrap()
     );
 }

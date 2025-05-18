@@ -178,25 +178,27 @@ impl Debuginfod {
     /// Matching `path` to actual source file is somewhat fuzzy.
     pub async fn source(
         &self,
-        _build_id: &BuildId,
-        _path: &str,
+        build_id: &BuildId,
+        path: &str,
     ) -> anyhow::Result<Option<CachedPath>> {
         // when gdb attempts to show the source of a function that comes
         // from a header in another library, the request is store path made
         // relative to /
         // in this case, let's fetch it
-        // if request.starts_with("nix/store") {
-        //     let absolute = PathBuf::from("/").join(request);
-        //     let demangled = demangle(absolute);
-        //     let error: anyhow::Result<()> = todo!()
-        //         .await
-        //         .with_context(|| format!("downloading source {}", demangled.display()));
-        //     return unwrap_file(error.map(|()| Some(demangled)))
-        //         .await
-        //         .into_response();
-        // }
-        // as a fallback, have a look at the source of the buildid
-        todo!()
+        if path.starts_with("nix/store") {
+            let absolute = PathBuf::from("/").join(path);
+            let store_path = StorePath::new(&absolute).context("invalid store path")?;
+            let demangled = store_path.demangle();
+            let fetched_root = self
+                .store_fetcher
+                .get(demangled.clone())
+                .await
+                .with_context(|| format!("downloading source {}", demangled.as_ref().display()))?;
+            Ok(fetched_root.map(|path| path.join(demangled.relative())))
+        } else {
+            // as a fallback, have a look at the source of the buildid
+            todo!()
+        }
     }
 }
 
@@ -256,6 +258,50 @@ mod test {
         assert_eq!(
             file_sha256(dbg!(executable.as_ref())),
             "a7942bdec982d11d0467e84743bee92138038e7a38f37ec08e5cc6fa5e3d18f3"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_source_explicit_store_path() {
+        setup_logging();
+        let t = tempdir().unwrap();
+        let substituter = FileSubstituter::test_fixture();
+        let debuginfod = Debuginfod::new(
+            t.path().into(),
+            Box::new(substituter),
+            Duration::from_secs(1000),
+        )
+        .await
+        .unwrap();
+        // /nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/bin/make
+        let buildid = BuildId::new("66b33fee92bf535e40d29622ce45b4bd01bebc1f").unwrap();
+        let path = "nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/include/gnumake.h";
+        let source = debuginfod.source(&buildid, path).await.unwrap().unwrap();
+        assert_eq!(
+            file_sha256(dbg!(source.as_ref())),
+            "3e38df96688ba32938ece2070219684616bd157750c8ba5042ccb790a49dcacc"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_source_explicit_mangled_store_path() {
+        setup_logging();
+        let t = tempdir().unwrap();
+        let substituter = FileSubstituter::test_fixture();
+        let debuginfod = Debuginfod::new(
+            t.path().into(),
+            Box::new(substituter),
+            Duration::from_secs(1000),
+        )
+        .await
+        .unwrap();
+        // /nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/bin/make
+        let buildid = BuildId::new("66b33fee92bf535e40d29622ce45b4bd01bebc1f").unwrap();
+        let path = "nix/store/6I1HJK6PA24A29SCQHIH4KZ1VFPGDRCD-gnumake-4.4.1/include/gnumake.h";
+        let source = debuginfod.source(&buildid, path).await.unwrap().unwrap();
+        assert_eq!(
+            file_sha256(dbg!(source.as_ref())),
+            "3e38df96688ba32938ece2070219684616bd157750c8ba5042ccb790a49dcacc"
         );
     }
 }
