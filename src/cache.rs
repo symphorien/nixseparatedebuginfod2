@@ -90,6 +90,7 @@ pub trait CachableFetcher<Key: FetcherCacheKey>: Send + Sync {
 }
 
 /// Like [`Path`] but ensures that the path is not modified until dropped.
+#[derive(Debug)]
 pub struct CachedPath {
     path: PathBuf,
     lock: RwLockReadGuardArc<()>,

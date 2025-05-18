@@ -189,12 +189,15 @@ impl Debuginfod {
             let absolute = PathBuf::from("/").join(path);
             let store_path = StorePath::new(&absolute).context("invalid store path")?;
             let demangled = store_path.demangle();
-            let fetched_root = self
+            match self
                 .store_fetcher
                 .get(demangled.clone())
                 .await
-                .with_context(|| format!("downloading source {}", demangled.as_ref().display()))?;
-            Ok(fetched_root.map(|path| path.join(demangled.relative())))
+                .with_context(|| format!("downloading source {}", demangled.as_ref().display()))?
+            {
+                None => Ok(None),
+                Some(cached_root) => return_if_exists(cached_root.join(demangled.relative())).await,
+            }
         } else {
             // as a fallback, have a look at the source of the buildid
             todo!()
@@ -303,5 +306,43 @@ mod test {
             file_sha256(dbg!(source.as_ref())),
             "3e38df96688ba32938ece2070219684616bd157750c8ba5042ccb790a49dcacc"
         );
+    }
+
+    #[tokio::test]
+    async fn test_source_missing_store_path() {
+        setup_logging();
+        let t = tempdir().unwrap();
+        let substituter = FileSubstituter::test_fixture();
+        let debuginfod = Debuginfod::new(
+            t.path().into(),
+            Box::new(substituter),
+            Duration::from_secs(1000),
+        )
+        .await
+        .unwrap();
+        // /nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/bin/make
+        let buildid = BuildId::new("66b33fee92bf535e40d29622ce45b4bd01bebc1f").unwrap();
+        let path = "nix/store/6I1H00000000000000004KZ1VFPGDRCD-gnumake-4.4.1/include/gnumake.h";
+        let source = debuginfod.source(&buildid, path).await.unwrap();
+        assert!(dbg!(source).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_source_missing_file_in_store_path() {
+        setup_logging();
+        let t = tempdir().unwrap();
+        let substituter = FileSubstituter::test_fixture();
+        let debuginfod = Debuginfod::new(
+            t.path().into(),
+            Box::new(substituter),
+            Duration::from_secs(1000),
+        )
+        .await
+        .unwrap();
+        // /nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/bin/make
+        let buildid = BuildId::new("66b33fee92bf535e40d29622ce45b4bd01bebc1f").unwrap();
+        let path = "nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/include/gnumake_does_not_exist.h";
+        let source = debuginfod.source(&buildid, path).await.unwrap();
+        assert!(dbg!(source).is_none());
     }
 }
