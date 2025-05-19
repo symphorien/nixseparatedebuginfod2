@@ -1,12 +1,10 @@
 //! Logic to find debuginfo in a substituter
 use std::{
-    ops::Deref,
-    path::{Path, PathBuf},
-    sync::Arc,
-    time::Duration,
+    ffi::OsStr, path::{Path, PathBuf}, sync::Arc, time::Duration
 };
 
 use anyhow::Context;
+use tracing::Level;
 
 use crate::{
     build_id::BuildId,
@@ -38,6 +36,8 @@ impl<T: Substituter + Send + Sync + ?Sized + 'static> CachableFetcher<StorePath>
         self.fetch_store_path(key, into).await
     }
 }
+
+const MAX_SYMLINK_DEPTH: usize = 20;
 
 /// The logic behind a debuginfod server: maps build ids to debug symbols, executables, and source
 /// files.
@@ -111,11 +111,75 @@ impl Debuginfod {
     ) -> anyhow::Result<Option<CachedPath>> {
         match self.debuginfo_fetcher.get(build_id.clone()).await {
             Ok(Some(nar)) => {
-                let debugfile = nar.join(&build_id.in_debug_output("debug"));
+                let debugfile = nar.join(build_id.in_debug_output("debug"));
                 return_if_exists(debugfile).await
             }
             Ok(None) => Ok(None),
             Err(e) => Err(e),
+        }
+    }
+
+    /// If the concrete path is a symlink to the store, fetch the store path containing the target, and return the concrete file representing the target.
+    ///
+    /// Re-resolves the target if the target is still a symlink, until some max depth.
+    ///
+    /// Return a file guaranteed to exist and not be a symlink.
+    #[tracing::instrument(level=Level::DEBUG, skip_all, fields(potential_symlink=%potential_symlink.as_ref().display()))]
+    async fn resolve_symlink_to_store(
+        &self,
+        mut potential_symlink: CachedPath,
+    ) -> anyhow::Result<Option<CachedPath>> {
+        let mut remaining_depth = MAX_SYMLINK_DEPTH;
+        loop {
+            match potential_symlink.as_ref().symlink_metadata() {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(e) => {
+                    return Err(e).context(format!(
+                    "testing existence of potential symlink {} before returning it from debuginfod",
+                    potential_symlink.as_ref().display()
+                ))
+                }
+                Ok(m) => {
+                    if !m.is_symlink() {
+                        return Ok(Some(potential_symlink));
+                    } else {
+                        if remaining_depth == 0 {
+                            anyhow::bail!("{} is still a symlink after {MAX_SYMLINK_DEPTH} readlink() operations", potential_symlink.as_ref().display());
+                        }
+                        remaining_depth -= 1;
+                        let link_content = tokio::fs::read_link(potential_symlink.as_ref())
+                            .await
+                            .with_context(|| {
+                            format!("readlink({})", potential_symlink.as_ref().display())
+                        })?;
+                        let target_store_path =
+                            StorePath::new(&link_content).with_context(|| {
+                                format!(
+                                    "symlink {} does not point to store path but {}",
+                                    potential_symlink.as_ref().display(),
+                                    link_content.display()
+                                )
+                            })?;
+                        let next_store_path =
+                            match self.store_fetcher.get(target_store_path.clone()).await {
+                                Err(e) => {
+                                    return Err(e).context(format!(
+                                        "pointed at by {}",
+                                        potential_symlink.as_ref().display()
+                                    ))
+                                }
+                                Ok(None) => return Ok(None),
+                                Ok(Some(path)) => path.join(target_store_path.relative()),
+                            };
+                        tracing::debug!(
+                            "resolved symlink {} to {}",
+                            potential_symlink.as_ref().display(),
+                            next_store_path.as_ref().display()
+                        );
+                        potential_symlink = next_store_path;
+                    }
+                }
+            }
         }
     }
 
@@ -128,44 +192,8 @@ impl Debuginfod {
     ) -> anyhow::Result<Option<CachedPath>> {
         match self.debuginfo_fetcher.get(build_id.clone()).await {
             Ok(Some(nar)) => {
-                let symlink = nar.join(&build_id.in_debug_output("executable"));
-                match tokio::fs::read_link(symlink.as_ref()).await {
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-                    Err(e) => Err(e).context(format!(
-                        "dereferencing symlink from debug output to executable {}",
-                        symlink.as_ref().display()
-                    )),
-                    Ok(exe_in_store_path) => {
-                        let exe_in_store_path =
-                            StorePath::new(&exe_in_store_path).with_context(|| {
-                                format!(
-                                    "symlink to executable {} is not a store path",
-                                    symlink.as_ref().display()
-                                )
-                            })?;
-                        tracing::debug!(
-                            build_id = build_id.deref(),
-                            "executable symlink points to {}",
-                            exe_in_store_path.as_ref().display()
-                        );
-                        match self.store_fetcher.get(exe_in_store_path.clone()).await {
-                            Ok(Some(store_path_root)) => {
-                                let actual_file =
-                                    store_path_root.join(exe_in_store_path.relative());
-                                tracing::debug!(
-                                    build_id = build_id.deref(),
-                                    "fetched {} as {}",
-                                    exe_in_store_path.as_ref().display(),
-                                    actual_file.as_ref().display()
-                                );
-                                // FIXME: what if it still a symlink to another store path
-                                return_if_exists(actual_file).await
-                            }
-                            Ok(None) => Ok(None),
-                            Err(e) => Err(e),
-                        }
-                    }
-                }
+                let symlink = nar.join(build_id.in_debug_output("executable"));
+                self.resolve_symlink_to_store(symlink).await
             }
             Ok(None) => Ok(None),
             Err(e) => Err(e),
@@ -200,8 +228,205 @@ impl Debuginfod {
             }
         } else {
             // as a fallback, have a look at the source of the buildid
-            todo!()
+            let debug_output = match self.debuginfo_fetcher.get(build_id.clone()).await {
+                Ok(Some(nar)) => nar,
+                Ok(None) => return Ok(None),
+                Err(e) => return Err(e),
+            };
+            let source_symlink = debug_output.join(build_id.in_debug_output("source"));
+            let Some(source) = self.resolve_symlink_to_store(source_symlink).await? else {
+                return Ok(None);
+            };
+            let source_dir = if source.as_ref().is_dir() {
+                source
+            } else {
+                // an archive
+                todo!()
+            };
+            let source_dir_path = source_dir.as_ref().to_path_buf();
+            let request = PathBuf::from(path);
+            let Some(matching_file) = tokio::task::spawn_blocking(move || get_file_for_source(&source_dir_path, &request)).await?? else { return Ok(None) };
+            self.resolve_symlink_to_store(source_dir.join(matching_file)).await
         }
+    }
+}
+
+/// Attempts to find a file that matches the request in an existing directory of source files
+///
+/// Returns a path relative to `source_dir`
+#[tracing::instrument(level=Level::DEBUG)]
+pub fn get_file_for_source(
+    source_dir: &Path,
+    request: &Path,
+) -> anyhow::Result<Option<PathBuf>> {
+    let target: Vec<&OsStr> = request.iter().collect();
+    // invariant: we only keep candidates which have same path as target for components i..
+    let mut candidates: Vec<_> = Vec::new();
+    for file in walkdir::WalkDir::new(source_dir) {
+        match file {
+            Err(e) => {
+                tracing::warn!("failed to walk source {}: {:#}", source_dir.display(), e);
+                continue;
+            }
+            Ok(f) => {
+                if Some(&f.file_name()) == target.last() {
+                    let path = f.path();
+                    match path.strip_prefix(source_dir) {
+                        Ok(relative_candidate) => candidates.push(relative_candidate.to_path_buf()),
+                        Err(e) => {
+                            tracing::warn!("walkdir({}) yielded {} which is not a suffix of {}: {e}", source_dir.display(),  path.display(), source_dir.display());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if candidates.len() < 2 {
+        return Ok(candidates.pop());
+    }
+    let mut best_total_len = 0;
+    let mut best_matching_len = 0;
+    let mut best_candidates = Vec::new();
+    for candidate in candidates {
+        let total_len = candidate.iter().count();
+        let matching_len = candidate
+            .iter()
+            .rev()
+            .zip(target.iter().rev())
+            .skip(1)
+            .position(|(ref c, t)| c != t)
+            .unwrap_or(total_len - 1);
+        if matching_len > best_matching_len
+            || (matching_len == best_matching_len && total_len < best_total_len)
+        {
+            best_matching_len = matching_len;
+            best_total_len = total_len;
+            best_candidates.clear();
+            best_candidates.push(candidate);
+        } else if matching_len == best_matching_len {
+            best_candidates.push(candidate);
+        }
+    }
+    if best_candidates.len() > 1 {
+        anyhow::bail!(
+            "cannot tell {:?} apart from {} for target {}",
+            &best_candidates,
+            &source_dir.display(),
+            request.display()
+        );
+    }
+    Ok(best_candidates.pop())
+}
+
+#[cfg(test)]
+fn make_test_source_path(paths: Vec<&'static str>) -> tempfile::TempDir {
+    let dir = tempfile::TempDir::new().unwrap();
+    for path in paths {
+        let path = dir.path().join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "content").unwrap();
+    }
+    dir
+}
+
+#[test]
+fn get_file_for_source_simple() {
+    let dir = make_test_source_path(vec!["soft-version/src/main.c", "soft-version/src/Makefile"]);
+    let res = get_file_for_source(dir.path(), "/source/soft-version/src/main.c".as_ref())
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        res,
+        Path::new("soft-version/src/main.c")
+    );
+}
+
+#[test]
+fn get_file_for_source_different_dir() {
+    let dir = make_test_source_path(vec!["lib/core-net/network.c", "lib/plat/optee/network.c"]);
+    let res = get_file_for_source(dir.path(), "/build/source/lib/core-net/network.c".as_ref())
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        res,
+        Path::new("lib/core-net/network.c")
+    );
+}
+
+#[test]
+fn get_file_for_source_regression_pr_7() {
+    let dir = make_test_source_path(vec![
+        "store/source/lib/core-net/network.c",
+        "store/source/lib/plat/optee/network.c",
+    ]);
+    let res = get_file_for_source(dir.path(), "build/source/lib/core-net/network.c".as_ref())
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        res,
+        Path::new("store/source/lib/core-net/network.c")
+    );
+}
+
+#[test]
+fn get_file_for_source_no_right_filename() {
+    let dir = make_test_source_path(vec![
+        "store/source/lib/core-net/network.c",
+        "store/source/lib/plat/optee/network.c",
+    ]);
+    let res = get_file_for_source(
+        dir.path(),
+        "build/source/lib/core-net/somethingelse.c".as_ref(),
+    );
+    assert_eq!(res.unwrap(), None);
+}
+
+#[test]
+fn get_file_for_source_glibc() {
+    let dir = make_test_source_path(vec![
+        "glibc-2.37/sysdeps/unix/sysv/linux/openat64.c",
+        "glibc-2.37/sysdeps/mach/hurd/openat64.c",
+        "glibc-2.37/io/openat64.c",
+    ]);
+    let res = get_file_for_source(
+        dir.path(),
+        "/build/glibc-2.37/io/../sysdeps/unix/sysv/linux/openat64.c".as_ref(),
+    );
+    assert_eq!(
+        res.unwrap().unwrap(),
+        Path::new(
+                "glibc-2.37/sysdeps/unix/sysv/linux/openat64.c")
+    );
+}
+
+#[test]
+fn get_file_for_source_misleading_dir() {
+    let dir = make_test_source_path(vec!["store/store/wrong/dir/file", "good/dir/store/file"]);
+    let res = get_file_for_source(dir.path(), "/build/project/store/file".as_ref());
+    assert_eq!(
+        res.unwrap().unwrap(),
+        Path::new("good/dir/store/file")
+    );
+}
+
+#[test]
+fn get_file_for_source_ambiguous() {
+    let sources = vec![
+        "glibc-2.37/sysdeps/unix/sysv/linux/openat64.c",
+        "glibc-2.37/sysdeps/mach/hurd/openat64.c",
+        "glibc-2.37/io/openat64.c",
+    ];
+    let dir = make_test_source_path(sources.clone());
+    let res = get_file_for_source(
+        dir.path(),
+        "/build/glibc-2.37/fakeexample/openat64.c".as_ref(),
+    );
+    assert!(res.is_err());
+    let msg = res.unwrap_err().to_string();
+    assert!(dbg!(&msg).contains("cannot tell"));
+    assert!(msg.contains("apart"));
+    for source in sources {
+        assert!(msg.contains(source));
     }
 }
 
@@ -344,5 +569,28 @@ mod test {
         let path = "nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/include/gnumake_does_not_exist.h";
         let source = debuginfod.source(&buildid, path).await.unwrap();
         assert!(dbg!(source).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_source_in_source_dir() {
+        setup_logging();
+        let t = tempdir().unwrap();
+        let substituter = FileSubstituter::test_fixture();
+        let debuginfod = Debuginfod::new(
+            t.path().into(),
+            Box::new(substituter),
+            Duration::from_secs(1000),
+        )
+        .await
+        .unwrap();
+        // /nix/store/anp6npvr7pmh8hdaqk6c9xm57pzrnqw3-ninja-1.12.1/bin/ninja
+        let buildid = BuildId::new("483bd7f7229bdb06462222e1e353e4f37e15c293").unwrap();
+        let path = "build/source/src/ninja.cc";
+        let source = debuginfod.source(&buildid, path).await.unwrap().unwrap();
+        // /nix/store/n11lk1q63864l8vfdl8h8aja1shs3yr7-source/src/ninja.cc
+        assert_eq!(
+            file_sha256(dbg!(source.as_ref())),
+            "5d013f718e1822493a98c5ca0c69fad4ec2279a0005a2cea8d665284563c3480"
+        );
     }
 }
