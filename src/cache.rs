@@ -104,10 +104,17 @@ impl AsRef<Path> for CachedPath {
 
 impl CachedPath {
     /// Wrapper around [`Path::join`].
+    ///
+    /// if rest is the really empty path, returns the path unchanged
     pub fn join<T: AsRef<Path>>(self, rest: T) -> Self {
-        Self {
-            path: self.path.join(rest),
-            lock: self.lock,
+        let path = rest.as_ref();
+        if path == Path::new("") {
+            self
+        } else {
+            Self {
+                path: self.path.join(path),
+                lock: self.lock,
+            }
         }
     }
 

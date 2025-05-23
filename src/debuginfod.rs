@@ -1,12 +1,16 @@
 //! Logic to find debuginfo in a substituter
 use std::{
-    ffi::OsStr, path::{Path, PathBuf}, sync::Arc, time::Duration
+    ffi::OsStr,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
 };
 
 use anyhow::Context;
 use tracing::Level;
 
 use crate::{
+    archive_cache::{ArchiveUnpacker, SourceArchive},
     build_id::BuildId,
     cache::{CachableFetcher, CachedPath, FetcherCache, FetcherCacheKey},
     store_path::StorePath,
@@ -47,7 +51,7 @@ const MAX_SYMLINK_DEPTH: usize = 20;
 pub struct Debuginfod {
     debuginfo_fetcher: Arc<FetcherCache<BuildId, Arc<BoxedSubstituter>>>,
     store_fetcher: Arc<FetcherCache<StorePath, Arc<BoxedSubstituter>>>,
-    // source_unpacker: FetcherCache,
+    source_unpacker: Arc<FetcherCache<SourceArchive, ArchiveUnpacker>>,
 }
 
 /// Returns the input if this file exists or None if it does not
@@ -84,8 +88,10 @@ impl Debuginfod {
         ensure_dir_exists(&cache_path).await?;
         let debuginfo_path = cache_path.join("debuginfo");
         let store_path = cache_path.join("store");
+        let source_path = cache_path.join("sources");
         ensure_dir_exists(&debuginfo_path).await?;
         ensure_dir_exists(&store_path).await?;
+        ensure_dir_exists(&source_path).await?;
         let substituter = Arc::new(substituter);
         Ok(Self {
             debuginfo_fetcher: Arc::new(
@@ -93,6 +99,9 @@ impl Debuginfod {
             ),
             store_fetcher: Arc::new(
                 FetcherCache::new(store_path, substituter.clone(), expiration).await?,
+            ),
+            source_unpacker: Arc::new(
+                FetcherCache::new(source_path, ArchiveUnpacker, expiration).await?,
             ),
         })
     }
@@ -240,13 +249,23 @@ impl Debuginfod {
             let source_dir = if source.as_ref().is_dir() {
                 source
             } else {
-                // an archive
-                todo!()
+                let archive = SourceArchive::new(source.as_ref(), build_id.clone());
+                match self.source_unpacker.get(archive).await? {
+                    None => return Ok(None),
+                    Some(x) => x,
+                }
             };
             let source_dir_path = source_dir.as_ref().to_path_buf();
             let request = PathBuf::from(path);
-            let Some(matching_file) = tokio::task::spawn_blocking(move || get_file_for_source(&source_dir_path, &request)).await?? else { return Ok(None) };
-            self.resolve_symlink_to_store(source_dir.join(matching_file)).await
+            let Some(matching_file) = tokio::task::spawn_blocking(move || {
+                get_file_for_source(&source_dir_path, &request)
+            })
+            .await??
+            else {
+                return Ok(None);
+            };
+            self.resolve_symlink_to_store(source_dir.join(matching_file))
+                .await
         }
     }
 }
@@ -255,10 +274,7 @@ impl Debuginfod {
 ///
 /// Returns a path relative to `source_dir`
 #[tracing::instrument(level=Level::DEBUG)]
-pub fn get_file_for_source(
-    source_dir: &Path,
-    request: &Path,
-) -> anyhow::Result<Option<PathBuf>> {
+pub fn get_file_for_source(source_dir: &Path, request: &Path) -> anyhow::Result<Option<PathBuf>> {
     let target: Vec<&OsStr> = request.iter().collect();
     // invariant: we only keep candidates which have same path as target for components i..
     let mut candidates: Vec<_> = Vec::new();
@@ -274,7 +290,12 @@ pub fn get_file_for_source(
                     match path.strip_prefix(source_dir) {
                         Ok(relative_candidate) => candidates.push(relative_candidate.to_path_buf()),
                         Err(e) => {
-                            tracing::warn!("walkdir({}) yielded {} which is not a suffix of {}: {e}", source_dir.display(),  path.display(), source_dir.display());
+                            tracing::warn!(
+                                "walkdir({}) yielded {} which is not a suffix of {}: {e}",
+                                source_dir.display(),
+                                path.display(),
+                                source_dir.display()
+                            );
                         }
                     }
                 }
@@ -335,10 +356,7 @@ fn get_file_for_source_simple() {
     let res = get_file_for_source(dir.path(), "/source/soft-version/src/main.c".as_ref())
         .unwrap()
         .unwrap();
-    assert_eq!(
-        res,
-        Path::new("soft-version/src/main.c")
-    );
+    assert_eq!(res, Path::new("soft-version/src/main.c"));
 }
 
 #[test]
@@ -347,10 +365,7 @@ fn get_file_for_source_different_dir() {
     let res = get_file_for_source(dir.path(), "/build/source/lib/core-net/network.c".as_ref())
         .unwrap()
         .unwrap();
-    assert_eq!(
-        res,
-        Path::new("lib/core-net/network.c")
-    );
+    assert_eq!(res, Path::new("lib/core-net/network.c"));
 }
 
 #[test]
@@ -362,10 +377,7 @@ fn get_file_for_source_regression_pr_7() {
     let res = get_file_for_source(dir.path(), "build/source/lib/core-net/network.c".as_ref())
         .unwrap()
         .unwrap();
-    assert_eq!(
-        res,
-        Path::new("store/source/lib/core-net/network.c")
-    );
+    assert_eq!(res, Path::new("store/source/lib/core-net/network.c"));
 }
 
 #[test]
@@ -394,8 +406,7 @@ fn get_file_for_source_glibc() {
     );
     assert_eq!(
         res.unwrap().unwrap(),
-        Path::new(
-                "glibc-2.37/sysdeps/unix/sysv/linux/openat64.c")
+        Path::new("glibc-2.37/sysdeps/unix/sysv/linux/openat64.c")
     );
 }
 
@@ -403,10 +414,7 @@ fn get_file_for_source_glibc() {
 fn get_file_for_source_misleading_dir() {
     let dir = make_test_source_path(vec!["store/store/wrong/dir/file", "good/dir/store/file"]);
     let res = get_file_for_source(dir.path(), "/build/project/store/file".as_ref());
-    assert_eq!(
-        res.unwrap().unwrap(),
-        Path::new("good/dir/store/file")
-    );
+    assert_eq!(res.unwrap().unwrap(), Path::new("good/dir/store/file"));
 }
 
 #[test]
@@ -591,6 +599,29 @@ mod test {
         assert_eq!(
             file_sha256(dbg!(source.as_ref())),
             "5d013f718e1822493a98c5ca0c69fad4ec2279a0005a2cea8d665284563c3480"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_source_in_archive() {
+        setup_logging();
+        let t = tempdir().unwrap();
+        let substituter = FileSubstituter::test_fixture();
+        let debuginfod = Debuginfod::new(
+            t.path().into(),
+            Box::new(substituter),
+            Duration::from_secs(1000),
+        )
+        .await
+        .unwrap();
+        // /nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/bin/make
+        let buildid = BuildId::new("66b33fee92bf535e40d29622ce45b4bd01bebc1f").unwrap();
+        let path = "/build/make-4.4.1/src/main.c";
+        let source = debuginfod.source(&buildid, path).await.unwrap().unwrap();
+        // /nix/store/0avnvyc7pkcr4pjqws7hwpy87m6wlnjc-make-4.4.1.tar.gz > make-4.4.1/src/main.c
+        assert_eq!(
+            file_sha256(dbg!(source.as_ref())),
+            "7f0b8a02a6449507c751cdf3315a11bb0e99f22dc75a33a8b82b9e78c9f0bff0"
         );
     }
 }

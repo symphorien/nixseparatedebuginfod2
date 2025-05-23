@@ -19,6 +19,7 @@ use std::{net::SocketAddr, time::Duration};
 use clap::Parser;
 use tracing_subscriber::prelude::*;
 
+pub mod archive_cache;
 pub mod build_id;
 pub mod cache;
 pub mod debuginfod;

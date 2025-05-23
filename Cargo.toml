@@ -28,6 +28,7 @@ weak-table = "0.3.2"
 console-subscriber = {version = "0.4", optional = true }
 tracing-chrome = {version = "0.7", optional = true }
 walkdir = "2.5.0"
+compress-tools = { version = "0.15.1", features = ["tokio_support"] }
 
 [dev-dependencies]
 hmac-sha256 = "1"
