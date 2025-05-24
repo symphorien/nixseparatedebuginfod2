@@ -16,6 +16,7 @@
 
 use std::{net::SocketAddr, time::Duration};
 
+use anyhow::Context;
 use clap::Parser;
 use reqwest::Url;
 use tracing_subscriber::prelude::*;
@@ -68,9 +69,11 @@ async fn main() -> anyhow::Result<()> {
     let args = Options::parse();
     let filter = std::env::var("RUST_LOG")
         .unwrap_or("nixseparatedebuginfod2=info,tower_http=debug".to_owned());
-    let fmt_layer = tracing_subscriber::fmt::layer()
-        .without_time()
-        .with_filter(tracing_subscriber::EnvFilter::builder().parse_lossy(&filter));
+    let fmt_layer = tracing_subscriber::fmt::layer().without_time().with_filter(
+        tracing_subscriber::EnvFilter::builder()
+            .parse(&filter)
+            .context("parsing RUST_LOG env var")?,
+    );
     let registry = tracing_subscriber::registry().with(fmt_layer);
 
     #[cfg(feature = "tokio-console")]
