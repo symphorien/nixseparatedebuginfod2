@@ -1312,7 +1312,6 @@ dependencies = [
  "async-trait",
  "axum 0.8.1",
  "axum-macros",
- "bytes",
  "clap",
  "compress-tools",
  "console-subscriber",
