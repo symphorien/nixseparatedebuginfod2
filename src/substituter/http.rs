@@ -1,11 +1,12 @@
-use std::path::Path;
+use std::{fmt::Debug, path::Path};
 
 use anyhow::Context;
 use futures::StreamExt;
 use http::StatusCode;
 use http_body_util::{BodyExt, Limited};
-use reqwest::{Client, Url};
+use reqwest::{Client, Response, Url};
 use tokio_util::io::StreamReader;
+use tracing::Level;
 
 use crate::{
     build_id::BuildId,
@@ -26,6 +27,14 @@ pub struct HttpSubstituter {
     client: Client,
 }
 
+impl Debug for HttpSubstituter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpSubstituter")
+            .field("url", &self.url.as_str())
+            .finish()
+    }
+}
+
 impl HttpSubstituter {
     /// Create an http or https substituter with this base url.
     pub fn new(url: Url) -> anyhow::Result<Self> {
@@ -42,16 +51,8 @@ impl HttpSubstituter {
     }
 
     async fn return_nar(&self, nar_url: Url, into: &Path) -> anyhow::Result<Presence> {
-        let response = self
-            .client
-            .get(nar_url.clone())
-            .send()
-            .await
-            .with_context(|| format!("connecting to {nar_url}"))?;
-        match response.status() {
-            StatusCode::OK => (),
-            StatusCode::NOT_FOUND => return Ok(Presence::NotFound),
-            other => anyhow::bail!("{nar_url} returned {other:?}"),
+        let Some(response) = self.query(&nar_url).await? else {
+            return Ok(Presence::NotFound);
         };
         let stream = response.bytes_stream();
         let nar_reader = StreamReader::new(stream.map(|r| r.map_err(std::io::Error::other)));
@@ -62,6 +63,28 @@ impl HttpSubstituter {
         unpack_nar(decompressing_nar_reader, into).await?;
 
         Ok(Presence::Found)
+    }
+
+    /// sends a get query to this url, and returns the response only if 200
+    ///
+    /// returns None on 404, an error in other cases.
+    #[tracing::instrument(level=Level::TRACE, err, skip(url), fields(url=%url))]
+    async fn query(&self, url: &Url) -> anyhow::Result<Option<Response>> {
+        let response = self
+            .client
+            .get(url.clone())
+            .send()
+            .await
+            .with_context(|| format!("connecting to {url}"))?;
+        match response.status() {
+            StatusCode::OK => (),
+            StatusCode::NOT_FOUND => {
+                tracing::trace!("404");
+                return Ok(None);
+            }
+            other => anyhow::bail!("{url} returned {other:?}"),
+        };
+        Ok(Some(response))
     }
 }
 
@@ -74,17 +97,16 @@ impl Substituter for HttpSubstituter {
         build_id: &BuildId,
         into: &std::path::Path,
     ) -> anyhow::Result<Presence> {
-        let url = self.make_url(&format!("debuginfo/{}.debug", build_id))?;
-        let response = self
-            .client
-            .get(url.clone())
-            .send()
-            .await
-            .with_context(|| format!("connecting to {url}"))?;
-        match response.status() {
-            StatusCode::OK => (),
-            StatusCode::NOT_FOUND => return Ok(Presence::NotFound),
-            other => anyhow::bail!("{url} returned {other:?}"),
+        // for cache.nixos.org
+        let url1 = self.make_url(&format!("debuginfo/{}", build_id))?;
+        // for file:// binary caches
+        let url2 = self.make_url(&format!("debuginfo/{}.debug", build_id))?;
+        let (url, response) = match self.query(&url1).await? {
+            Some(r) => (url1, r),
+            None => match self.query(&url2).await? {
+                Some(r) => (url2, r),
+                None => return Ok(Presence::NotFound),
+            },
         };
         let body = Limited::new(
             std::convert::Into::<reqwest::Body>::into(response),
@@ -107,16 +129,8 @@ impl Substituter for HttpSubstituter {
         into: &std::path::Path,
     ) -> anyhow::Result<Presence> {
         let narinfo_url = self.make_url(&format!("{}.narinfo", store_path.hash()))?;
-        let response = self
-            .client
-            .get(narinfo_url.clone())
-            .send()
-            .await
-            .with_context(|| format!("connecting to {narinfo_url}"))?;
-        match response.status() {
-            StatusCode::OK => (),
-            StatusCode::NOT_FOUND => return Ok(Presence::NotFound),
-            other => anyhow::bail!("{narinfo_url} returned {other:?}"),
+        let Some(response) = self.query(&narinfo_url).await? else {
+            return Ok(Presence::NotFound);
         };
         let stream = response.bytes_stream();
         let reader = StreamReader::new(stream.map(|r| r.map_err(std::io::Error::other)));
