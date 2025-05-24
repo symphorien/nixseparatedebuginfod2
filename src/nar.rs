@@ -1,10 +1,12 @@
 //! utilities about NAR files (nix archives)
 use anyhow::Context;
+use futures::StreamExt;
 use std::fmt::Debug;
 use std::path::Path;
 use std::pin::pin;
 use std::process::Stdio;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWriteExt};
+use tokio::io::{AsyncBufRead, AsyncRead, AsyncWriteExt};
+use tokio_util::codec::{FramedRead, LinesCodec};
 
 /// Unpacks the nar passed in argument to the specified path.
 ///
@@ -52,12 +54,15 @@ pub async fn unpack_nar<T: AsyncRead + Debug>(nar: T, destination: &Path) -> any
 
 const NAR_URL_KEY: &str = "URL: ";
 
+const NAR_MAX_LINES_LENGTH: usize = 1024;
+
 /// Parses a narinfo to find the relative location of the corresponing nar.
 pub async fn narinfo_to_nar_location<T: AsyncBufRead>(narinfo: T) -> anyhow::Result<String> {
-    // FIXME: protect against large file with no newline
     let narinfo = pin!(narinfo);
-    let mut lines = pin!(narinfo.lines());
-    while let Some(line) = lines.next_line().await.context("parsing narinfo line")? {
+    let decoder = LinesCodec::new_with_max_length(NAR_MAX_LINES_LENGTH);
+    let mut lines = pin!(FramedRead::new(narinfo, decoder));
+    while let Some(line) = lines.next().await {
+        let line = line.context("parsing narinfo line")?;
         if let Some(suffix) = line.strip_prefix(NAR_URL_KEY) {
             return Ok(suffix.to_owned());
         }

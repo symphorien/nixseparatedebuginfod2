@@ -72,7 +72,7 @@ async fn test_read_small_file_missing() {
     read_small_file(&file).await.unwrap().ok_or(()).unwrap_err();
 }
 
-/// Fetching from `file:://` substituters.
+/// Fetching from `file://` substituters.
 ///
 /// The substituter must have been created with `?index-debug-info=true`.
 #[derive(Debug)]

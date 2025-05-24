@@ -1,7 +1,8 @@
+use reqwest::Url;
 ///! Functions used in tests only
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Once;
+use std::sync::{LazyLock, Once};
 use tracing::Level;
 use tracing_subscriber::filter;
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -74,4 +75,15 @@ pub fn fixture(path: &str) -> PathBuf {
         .join(path);
     assert!(path.exists());
     path
+}
+
+pub static HTTP_BINARY_CACHE: LazyLock<Url> = LazyLock::new(start_http_binary_cache);
+
+fn start_http_binary_cache() -> Url {
+    let dir = fixture("file_binary_cache");
+    let port = port_check::free_local_ipv4_port().unwrap();
+    let server =
+        http_handle::server::Server::new(&format!("127.0.0.1:{port}"), dir.to_str().unwrap());
+    std::thread::spawn(move || server.start().unwrap());
+    Url::parse(&format!("http://127.0.0.1:{port}")).unwrap()
 }

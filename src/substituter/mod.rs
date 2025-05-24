@@ -2,6 +2,8 @@
 
 /// support for `file://` substituters
 pub mod file;
+/// support for `http://` and `https://` substituters
+pub mod http;
 use std::path::Path;
 
 use anyhow::Context;
