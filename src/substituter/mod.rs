@@ -8,6 +8,8 @@ use std::path::Path;
 
 use anyhow::Context;
 use file::FileSubstituter;
+use http::HttpSubstituter;
+use reqwest::Url;
 use serde::Deserialize;
 
 use crate::{build_id::BuildId, store_path::StorePath, utils::Presence};
@@ -49,24 +51,32 @@ pub type BoxedSubstituter = Box<dyn Substituter + Send + Sync + 'static>;
 
 /// Returns a substituter corresponding to the specified url.
 ///
-/// Query params are not supported.
+/// Query params are ignored
 ///
 /// Returns an error if no implementation can handle this url.
-pub async fn substituter_from_url(url: &str) -> anyhow::Result<BoxedSubstituter> {
-    if let Some(path) = url.strip_prefix("file://") {
-        let path = Path::new(path);
-        let _ = tokio::fs::metadata(path).await.with_context(|| {
-            format!(
-                "cannot use {} as Substituter: {} does not exist",
-                url,
-                path.display()
-            )
-        })?;
-        Ok(Box::new(FileSubstituter::new(path)))
-    } else {
-        anyhow::bail!(
-            "I don't know how to handle this kind of Substituter: {}",
-            url
-        );
+pub async fn substituter_from_url(url: &Url) -> anyhow::Result<BoxedSubstituter> {
+    match url.scheme() {
+        "file" => {
+            let path = Path::new(url.path());
+            let _ = tokio::fs::metadata(path).await.with_context(|| {
+                format!(
+                    "cannot use {} as Substituter: {} does not exist",
+                    url,
+                    path.display()
+                )
+            })?;
+            Ok(Box::new(FileSubstituter::new(path)))
+        }
+        "http" | "https" => {
+            let substituter = Box::new(HttpSubstituter::new(url.clone()))
+                .with_context(|| format!("creating an http substituter from {url}"))?;
+            Ok(Box::new(substituter))
+        }
+        other => {
+            anyhow::bail!(
+                "I don't know how to handle this kind of Substituter: {}",
+                other
+            );
+        }
     }
 }

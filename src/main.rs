@@ -17,6 +17,7 @@
 use std::{net::SocketAddr, time::Duration};
 
 use clap::Parser;
+use reqwest::Url;
 use tracing_subscriber::prelude::*;
 
 pub mod archive_cache;
@@ -41,7 +42,7 @@ pub struct Options {
     listen_address: SocketAddr,
     /// Substituter (aka binary cache) containing the debug symbols
     #[arg(short, long)]
-    substituter: String,
+    substituter: Url,
     /// Directory where files downloaded from the substituter are stored
     #[arg(short, long, default_value_t = default_cache_directory())]
     cache_dir: String,
