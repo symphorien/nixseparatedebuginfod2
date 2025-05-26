@@ -270,31 +270,30 @@ impl Debuginfod {
     }
 }
 
-/// Attempts to find a file that matches the request in an existing directory of source files
+/// Returns the set of files in this directory with the specified file name
 ///
-/// Returns a path relative to `source_dir`
-#[tracing::instrument(level=Level::DEBUG)]
-pub fn get_file_for_source(source_dir: &Path, request: &Path) -> anyhow::Result<Option<PathBuf>> {
-    let target: Vec<&OsStr> = request.iter().collect();
-    // invariant: we only keep candidates which have same path as target for components i..
-    let mut candidates: Vec<_> = Vec::new();
-    for file in walkdir::WalkDir::new(source_dir) {
+/// Paths are returned relative to `dir`.
+///
+/// Errors are ignored.
+fn find_file_in_dir(dir: &Path, file_name: &OsStr) -> Vec<PathBuf> {
+    let mut result = Vec::new();
+    for file in walkdir::WalkDir::new(dir) {
         match file {
             Err(e) => {
-                tracing::warn!("failed to walk source {}: {:#}", source_dir.display(), e);
+                tracing::warn!("failed to walk source {}: {:#}", dir.display(), e);
                 continue;
             }
             Ok(f) => {
-                if Some(&f.file_name()) == target.last() {
+                if f.file_name() == file_name {
                     let path = f.path();
-                    match path.strip_prefix(source_dir) {
-                        Ok(relative_candidate) => candidates.push(relative_candidate.to_path_buf()),
+                    match path.strip_prefix(dir) {
+                        Ok(relative_path) => result.push(relative_path.to_path_buf()),
                         Err(e) => {
                             tracing::warn!(
                                 "walkdir({}) yielded {} which is not a suffix of {}: {e}",
-                                source_dir.display(),
+                                dir.display(),
                                 path.display(),
-                                source_dir.display()
+                                dir.display()
                             );
                         }
                     }
@@ -302,41 +301,63 @@ pub fn get_file_for_source(source_dir: &Path, request: &Path) -> anyhow::Result<
             }
         }
     }
-    if candidates.len() < 2 {
-        return Ok(candidates.pop());
-    }
-    let mut best_total_len = 0;
-    let mut best_matching_len = 0;
-    let mut best_candidates = Vec::new();
-    for candidate in candidates {
-        let total_len = candidate.iter().count();
-        let matching_len = candidate
-            .iter()
-            .rev()
-            .zip(target.iter().rev())
-            .skip(1)
-            .position(|(ref c, t)| c != t)
-            .unwrap_or(total_len - 1);
-        if matching_len > best_matching_len
-            || (matching_len == best_matching_len && total_len < best_total_len)
-        {
-            best_matching_len = matching_len;
-            best_total_len = total_len;
-            best_candidates.clear();
-            best_candidates.push(candidate);
-        } else if matching_len == best_matching_len {
-            best_candidates.push(candidate);
-        }
-    }
-    if best_candidates.len() > 1 {
+    result
+}
+
+/// a number that expresses how close the candidate path is to the reference. higher is closer.
+fn matching_measure(candidate: &Path, reference: &Path) -> usize {
+    candidate
+        .iter()
+        .rev()
+        .zip(reference.iter().rev())
+        .position(|(ref c, ref t)| c != t)
+        .unwrap_or_else(|| candidate.iter().count())
+}
+
+/// returns the path with higher matching_measure
+///
+/// None if `candidates` is empty
+///
+/// Err if there are several best matches.
+fn best_matching_measure(
+    candidates: &[PathBuf],
+    reference: &Path,
+) -> anyhow::Result<Option<PathBuf>> {
+    let ranked: Vec<_> = candidates
+        .iter()
+        .map(|c| (matching_measure(c, reference), c))
+        .collect();
+    let Some(best) = ranked.iter().map(|(measure, _)| measure).max() else {
+        return Ok(None);
+    };
+    let equals: Vec<_> = ranked
+        .iter()
+        .filter_map(|(measure, c)| if measure == best { Some(c) } else { None })
+        .collect();
+    if equals.len() != 1 {
         anyhow::bail!(
-            "cannot tell {:?} apart from {} for target {}",
-            &best_candidates,
-            &source_dir.display(),
-            request.display()
+            "cannot tell {:?} apart for target {}",
+            &equals,
+            reference.display()
         );
     }
-    Ok(best_candidates.pop())
+    Ok(Some(equals[0].to_path_buf()))
+}
+
+/// Attempts to find a file that matches the request in an existing directory of source files
+///
+/// Returns a path relative to `source_dir`
+///
+/// Returns None if no file matches
+///
+/// Returns Err if several file match and we don't know which one is the best one.
+#[tracing::instrument(level=Level::DEBUG)]
+pub fn get_file_for_source(source_dir: &Path, request: &Path) -> anyhow::Result<Option<PathBuf>> {
+    let Some(filename) = request.file_name() else {
+        anyhow::bail!("requested path {} has no filename", request.display())
+    };
+    let candidates = find_file_in_dir(source_dir, filename);
+    best_matching_measure(&candidates, request)
 }
 
 #[cfg(test)]
@@ -430,7 +451,7 @@ fn get_file_for_source_ambiguous() {
         "/build/glibc-2.37/fakeexample/openat64.c".as_ref(),
     );
     assert!(res.is_err());
-    let msg = res.unwrap_err().to_string();
+    let msg = dbg!(res.unwrap_err().to_string());
     assert!(dbg!(&msg).contains("cannot tell"));
     assert!(msg.contains("apart"));
     for source in sources {
