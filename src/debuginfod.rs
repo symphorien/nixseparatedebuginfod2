@@ -161,15 +161,28 @@ impl Debuginfod {
                             .with_context(|| {
                             format!("readlink({})", potential_symlink.as_ref().display())
                         })?;
-                        let target_store_path =
-                            StorePath::new(&link_content).with_context(|| {
-                                format!(
-                                    "symlink {} does not point to store path but {}",
-                                    potential_symlink.as_ref().display(),
-                                    link_content.display()
-                                )
-                            })?;
-                        let next_store_path =
+                        let next_store_path = if link_content.is_relative() {
+                            let dir = potential_symlink.clone().parent()?;
+                            let path = dir.join(link_content);
+                            match tokio::fs::metadata(&path).await {
+                                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                                    return Ok(None)
+                                }
+                                Err(e) => {
+                                    return Err(e).context(format!("testing existence of {path:?}"))
+                                }
+                                Ok(_) => (),
+                            };
+                            path
+                        } else {
+                            let target_store_path =
+                                StorePath::new(&link_content).with_context(|| {
+                                    format!(
+                                        "symlink {} does not point to store path but {}",
+                                        potential_symlink.as_ref().display(),
+                                        link_content.display()
+                                    )
+                                })?;
                             match self.store_fetcher.get(target_store_path.clone()).await {
                                 Err(e) => {
                                     return Err(e).context(format!(
@@ -179,7 +192,8 @@ impl Debuginfod {
                                 }
                                 Ok(None) => return Ok(None),
                                 Ok(Some(path)) => path.join(target_store_path.relative()),
-                            };
+                            }
+                        };
                         tracing::debug!(
                             "resolved symlink {} to {}",
                             potential_symlink.as_ref().display(),
@@ -242,7 +256,9 @@ impl Debuginfod {
                 Ok(None) => return Ok(None),
                 Err(e) => return Err(e),
             };
-            let source_symlink = debug_output.join(build_id.in_debug_output("source"));
+            let source_symlink = debug_output
+                .clone()
+                .join(build_id.in_debug_output("source"));
             let Some(source) = self.resolve_symlink_to_store(source_symlink).await? else {
                 return Ok(None);
             };
@@ -255,17 +271,28 @@ impl Debuginfod {
                     Some(x) => x,
                 }
             };
+            let overlay_symlink = debug_output.join(build_id.in_debug_output("sourceoverlay"));
+            let overlay_symlink_path = overlay_symlink.as_ref().to_owned();
+            let overlay_dir = self
+                .resolve_symlink_to_store(overlay_symlink)
+                .await?
+                .unwrap_or_else(|| {
+                    tracing::warn!("{overlay_symlink_path:?} is missing");
+                    source_dir.clone()
+                });
             let source_dir_path = source_dir.as_ref().to_path_buf();
+            let overaly_dir_path = overlay_dir.as_ref().to_path_buf();
             let request = PathBuf::from(path);
-            let Some(matching_file) = tokio::task::spawn_blocking(move || {
-                get_file_for_source(&source_dir_path, &request)
+            let matching_file = match tokio::task::spawn_blocking(move || {
+                get_file_for_source(&source_dir_path, &overaly_dir_path, &request)
             })
             .await??
-            else {
-                return Ok(None);
+            {
+                None => return Ok(None),
+                Some(SourceMatch::Source(p)) => source_dir.join(p),
+                Some(SourceMatch::Overlay(p)) => overlay_dir.join(p),
             };
-            self.resolve_symlink_to_store(source_dir.join(matching_file))
-                .await
+            self.resolve_symlink_to_store(matching_file).await
         }
     }
 }
@@ -344,6 +371,12 @@ fn best_matching_measure(
     Ok(Some(equals[0].to_path_buf()))
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+enum SourceMatch {
+    Source(PathBuf),
+    Overlay(PathBuf),
+}
+
 /// Attempts to find a file that matches the request in an existing directory of source files
 ///
 /// Returns a path relative to `source_dir`
@@ -352,12 +385,37 @@ fn best_matching_measure(
 ///
 /// Returns Err if several file match and we don't know which one is the best one.
 #[tracing::instrument(level=Level::DEBUG)]
-pub fn get_file_for_source(source_dir: &Path, request: &Path) -> anyhow::Result<Option<PathBuf>> {
+pub fn get_file_for_source(
+    source_dir: &Path,
+    overlay_dir: &Path,
+    request: &Path,
+) -> anyhow::Result<Option<SourceMatch>> {
     let Some(filename) = request.file_name() else {
         anyhow::bail!("requested path {} has no filename", request.display())
     };
     let candidates = find_file_in_dir(source_dir, filename);
-    best_matching_measure(&candidates, request)
+    let best_source = match best_matching_measure(&candidates, request) {
+        Err(e) => return Err(e),
+        Ok(None) => return Ok(None),
+        Ok(Some(x)) => x,
+    };
+    let overlay_candidates = find_file_in_dir(overlay_dir, filename);
+    let matching_overlay_candiates: Vec<_> = overlay_candidates
+        .iter()
+        .filter(|c| match best_matching_measure(&candidates, c) {
+            Err(_) => false,
+            Ok(None) => false,
+            Ok(Some(ref f)) => f == &best_source,
+        })
+        .collect();
+    match &matching_overlay_candiates[..] {
+        [] => Ok(Some(SourceMatch::Source(best_source))),
+        [best_overlay] => Ok(Some(SourceMatch::Overlay(best_overlay.into()))),
+        _ => {
+            tracing::warn!("several overlay files {matching_overlay_candiates:?} may correspond to source match {best_source:?}, returning source match");
+            Ok(Some(SourceMatch::Source(best_source)))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -374,19 +432,35 @@ fn make_test_source_path(paths: Vec<&'static str>) -> tempfile::TempDir {
 #[test]
 fn get_file_for_source_simple() {
     let dir = make_test_source_path(vec!["soft-version/src/main.c", "soft-version/src/Makefile"]);
-    let res = get_file_for_source(dir.path(), "/source/soft-version/src/main.c".as_ref())
-        .unwrap()
-        .unwrap();
-    assert_eq!(res, Path::new("soft-version/src/main.c"));
+    let overlay = make_test_source_path(vec![]);
+    let res = get_file_for_source(
+        dir.path(),
+        overlay.path(),
+        "/source/soft-version/src/main.c".as_ref(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        res,
+        SourceMatch::Source(PathBuf::from("soft-version/src/main.c"))
+    );
 }
 
 #[test]
 fn get_file_for_source_different_dir() {
     let dir = make_test_source_path(vec!["lib/core-net/network.c", "lib/plat/optee/network.c"]);
-    let res = get_file_for_source(dir.path(), "/build/source/lib/core-net/network.c".as_ref())
-        .unwrap()
-        .unwrap();
-    assert_eq!(res, Path::new("lib/core-net/network.c"));
+    let overlay = make_test_source_path(vec![]);
+    let res = get_file_for_source(
+        dir.path(),
+        overlay.path(),
+        "/build/source/lib/core-net/network.c".as_ref(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        res,
+        SourceMatch::Source(PathBuf::from("lib/core-net/network.c"))
+    );
 }
 
 #[test]
@@ -395,10 +469,18 @@ fn get_file_for_source_regression_pr_7() {
         "store/source/lib/core-net/network.c",
         "store/source/lib/plat/optee/network.c",
     ]);
-    let res = get_file_for_source(dir.path(), "build/source/lib/core-net/network.c".as_ref())
-        .unwrap()
-        .unwrap();
-    assert_eq!(res, Path::new("store/source/lib/core-net/network.c"));
+    let overlay = make_test_source_path(vec![]);
+    let res = get_file_for_source(
+        dir.path(),
+        overlay.path(),
+        "build/source/lib/core-net/network.c".as_ref(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        res,
+        SourceMatch::Source(PathBuf::from("store/source/lib/core-net/network.c"))
+    );
 }
 
 #[test]
@@ -407,8 +489,10 @@ fn get_file_for_source_no_right_filename() {
         "store/source/lib/core-net/network.c",
         "store/source/lib/plat/optee/network.c",
     ]);
+    let overlay = make_test_source_path(vec![]);
     let res = get_file_for_source(
         dir.path(),
+        overlay.path(),
         "build/source/lib/core-net/somethingelse.c".as_ref(),
     );
     assert_eq!(res.unwrap(), None);
@@ -421,21 +505,33 @@ fn get_file_for_source_glibc() {
         "glibc-2.37/sysdeps/mach/hurd/openat64.c",
         "glibc-2.37/io/openat64.c",
     ]);
+    let overlay = make_test_source_path(vec![]);
     let res = get_file_for_source(
         dir.path(),
+        overlay.path(),
         "/build/glibc-2.37/io/../sysdeps/unix/sysv/linux/openat64.c".as_ref(),
     );
     assert_eq!(
         res.unwrap().unwrap(),
-        Path::new("glibc-2.37/sysdeps/unix/sysv/linux/openat64.c")
+        SourceMatch::Source(PathBuf::from(
+            "glibc-2.37/sysdeps/unix/sysv/linux/openat64.c"
+        ))
     );
 }
 
 #[test]
 fn get_file_for_source_misleading_dir() {
     let dir = make_test_source_path(vec!["store/store/wrong/dir/file", "good/dir/store/file"]);
-    let res = get_file_for_source(dir.path(), "/build/project/store/file".as_ref());
-    assert_eq!(res.unwrap().unwrap(), Path::new("good/dir/store/file"));
+    let overlay = make_test_source_path(vec![]);
+    let res = get_file_for_source(
+        dir.path(),
+        overlay.path(),
+        "/build/project/store/file".as_ref(),
+    );
+    assert_eq!(
+        res.unwrap().unwrap(),
+        SourceMatch::Source(PathBuf::from("good/dir/store/file"))
+    );
 }
 
 #[test]
@@ -446,8 +542,10 @@ fn get_file_for_source_ambiguous() {
         "glibc-2.37/io/openat64.c",
     ];
     let dir = make_test_source_path(sources.clone());
+    let overlay = make_test_source_path(vec![]);
     let res = get_file_for_source(
         dir.path(),
+        overlay.path(),
         "/build/glibc-2.37/fakeexample/openat64.c".as_ref(),
     );
     assert!(res.is_err());
@@ -457,6 +555,77 @@ fn get_file_for_source_ambiguous() {
     for source in sources {
         assert!(msg.contains(source));
     }
+}
+
+#[test]
+fn get_file_for_source_overlay_nothing_to_do() {
+    let dir = make_test_source_path(vec!["lib/core-net/network.c", "lib/plat/optee/network.c"]);
+    let overlay = make_test_source_path(vec!["lib/different"]);
+    let res = get_file_for_source(
+        dir.path(),
+        overlay.path(),
+        "/build/source/lib/core-net/network.c".as_ref(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        res,
+        SourceMatch::Source(PathBuf::from("lib/core-net/network.c"))
+    );
+}
+
+#[test]
+fn get_file_for_source_overlay_easy() {
+    let dir = make_test_source_path(vec!["lib/core-net/network.c", "lib/plat/optee/network.c"]);
+    let overlay = make_test_source_path(vec!["source/lib/core-net/network.c"]);
+    let res = get_file_for_source(
+        dir.path(),
+        overlay.path(),
+        "/build/source/lib/core-net/network.c".as_ref(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        res,
+        SourceMatch::Overlay(PathBuf::from("source/lib/core-net/network.c"))
+    );
+}
+
+#[test]
+fn get_file_for_source_overlay_other_path_patched() {
+    let dir = make_test_source_path(vec!["lib/core-net/network.c", "lib/plat/optee/network.c"]);
+    let overlay = make_test_source_path(vec!["source/lib/core-net/network.c"]);
+    let res = get_file_for_source(
+        dir.path(),
+        overlay.path(),
+        "/build/source/lib/plat/optee/network.c".as_ref(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        res,
+        SourceMatch::Source(PathBuf::from("lib/plat/optee/network.c"))
+    );
+}
+
+#[test]
+fn get_file_for_source_overlay_choice() {
+    let dir = make_test_source_path(vec!["lib/core-net/network.c", "lib/plat/optee/network.c"]);
+    let overlay = make_test_source_path(vec![
+        "source/lib/core-net/network.c",
+        "source/lib/plat/optee/network.c",
+    ]);
+    let res = get_file_for_source(
+        dir.path(),
+        overlay.path(),
+        "/build/source/lib/plat/optee/network.c".as_ref(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        res,
+        SourceMatch::Overlay(PathBuf::from("source/lib/plat/optee/network.c"))
+    );
 }
 
 #[cfg(test)]
@@ -643,6 +812,29 @@ mod test {
         assert_eq!(
             file_sha256(dbg!(source.as_ref())),
             "7f0b8a02a6449507c751cdf3315a11bb0e99f22dc75a33a8b82b9e78c9f0bff0"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_source_in_archive_patched() {
+        setup_logging();
+        let t = tempdir().unwrap();
+        let substituter = FileSubstituter::test_fixture();
+        let debuginfod = Debuginfod::new(
+            t.path().into(),
+            Box::new(substituter),
+            Duration::from_secs(1000),
+        )
+        .await
+        .unwrap();
+        // /nix/store/sbrb2ymlvq2bg7v8nf7p7qkqg5q2ks32-gnumake-4.4.1/bin/make
+        let buildid = BuildId::new("45a9ee3e03d0ab4797561a6668e85a5be6a86262").unwrap();
+        let path = "/build/make-4.4.1/src/job.c";
+        let source = debuginfod.source(&buildid, path).await.unwrap().unwrap();
+        // /nix/store/sj8bfxjk8scdkgmlpan0s8cqccf0ny9j-gnumake-4.4.1-debug/src/overlay/make-4.4.1/src/job.c
+        assert_eq!(
+            file_sha256(dbg!(source.as_ref())),
+            "65c819269ed09f81de1d1659efb76008f23bb748c805409f1ad5f782d15836df"
         );
     }
 }

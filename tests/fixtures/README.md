@@ -8,4 +8,9 @@ It contains:
   * `/nix/store/anp6npvr7pmh8hdaqk6c9xm57pzrnqw3-ninja-1.12.1`
   * `/nix/store/4zkqxj4frr3gbwrnba9crk5xp0xy4z4i-ninja-1.12.1-debug`
   * `/nix/store/n11lk1q63864l8vfdl8h8aja1shs3yr7-source`
+After I added support for patched files in `25231127dcf5842fe0c58542efecc0f9c8952881`, I added:
+- another copy of gnumake
+  * `/nix/store/sj8bfxjk8scdkgmlpan0s8cqccf0ny9j-gnumake-4.4.1-debug/`
+  * `/nix/store/sbrb2ymlvq2bg7v8nf7p7qkqg5q2ks32-gnumake-4.4.1`
+  * `/nix/store/0avnvyc7pkcr4pjqws7hwpy87m6wlnjc-make-4.4.1.tar.gz`
 

@@ -90,10 +90,18 @@ pub trait CachableFetcher<Key: FetcherCacheKey>: Send + Sync {
 }
 
 /// Like [`Path`] but ensures that the path is not modified until dropped.
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct CachedPath {
     path: PathBuf,
-    lock: RwLockReadGuardArc<()>,
+    lock: Arc<RwLockReadGuardArc<()>>,
+}
+
+impl Debug for CachedPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("CachedPath")
+            .field(&self.path.display())
+            .finish()
+    }
 }
 
 impl AsRef<Path> for CachedPath {
@@ -106,6 +114,8 @@ impl CachedPath {
     /// Wrapper around [`Path::join`].
     ///
     /// if rest is the really empty path, returns the path unchanged
+    ///
+    /// FIXME: guard against escaping
     pub fn join<T: AsRef<Path>>(self, rest: T) -> Self {
         let path = rest.as_ref();
         if path == Path::new("") {
@@ -118,10 +128,22 @@ impl CachedPath {
         }
     }
 
+    /// FIXME: guard against escaping
+    pub fn parent(self) -> anyhow::Result<Self> {
+        let path = self
+            .path
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("{} has no parent", self.path.display()))?;
+        Ok(Self {
+            path: path.to_path_buf(),
+            lock: self.lock,
+        })
+    }
+
     fn new<Key: FetcherCacheKey>(path: PathBuf, lock: ReadLockedCacheEntry<Key>) -> Self {
         Self {
             path,
-            lock: lock.lock,
+            lock: Arc::new(lock.lock),
         }
     }
 }
