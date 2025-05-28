@@ -17,9 +17,16 @@ then you can run
 ```
 cargo run -- --substituter file://...
 ```
+or
+```
+cargo run -- --substituter https://cache.nixos.org
+```
 
 and set the environment variable `DEBUGINFOD_URLS=http://127.0.0.1:1949`.
 
+### Warning
+
+Does not protect itself correctly from path traversal attacks.
 
 ### License
 
