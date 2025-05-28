@@ -27,6 +27,7 @@ pub mod cache;
 pub mod debuginfod;
 pub mod nar;
 pub mod server;
+pub mod source_selection;
 pub mod store_path;
 pub mod substituter;
 pub mod utils;
