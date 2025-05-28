@@ -1,0 +1,9 @@
+StorePath: /nix/store/iin7cld60ckwspc6d6xh7chmxq1yga13-libunistring-1.3
+URL: nar/152h433qaw8503jd8rrx6bhh60jg0iy3x713amgw4za19hwc8y39.nar.xz
+Compression: xz
+FileHash: sha256:152h433qaw8503jd8rrx6bhh60jg0iy3x713amgw4za19hwc8y39
+FileSize: 465048
+NarHash: sha256:0k643y81k8j04bfv3kc0iq1f05pkglpk5hbs5r94vq1cmp8gkz8n
+NarSize: 2070240
+References: iin7cld60ckwspc6d6xh7chmxq1yga13-libunistring-1.3
+Deriver: 2hlqmpvv20pmzvcyzq59f2gwzh7byz5g-libunistring-1.3.drv

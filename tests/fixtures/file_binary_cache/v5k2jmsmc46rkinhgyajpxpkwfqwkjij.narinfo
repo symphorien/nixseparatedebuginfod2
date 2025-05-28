@@ -1,0 +1,9 @@
+StorePath: /nix/store/v5k2jmsmc46rkinhgyajpxpkwfqwkjij-bash-5.2p37
+URL: nar/1v30gkjrm2522qig4cll1fq8l580lhh2qgj8bjid4s9ygrj5a7mw.nar.xz
+Compression: xz
+FileHash: sha256:1v30gkjrm2522qig4cll1fq8l580lhh2qgj8bjid4s9ygrj5a7mw
+FileSize: 445720
+NarHash: sha256:11pz5pmyfgaz5bwg9a26ybml1k6s8gnibalggasw5z771k0wc6i7
+NarSize: 1654408
+References: 0vgzyl7m0k3jss8gjkx98bpvb86bmx20-glibc-2.40-66 v5k2jmsmc46rkinhgyajpxpkwfqwkjij-bash-5.2p37
+Deriver: vd0f33v6y05zing9gzfr9wnh301i74mn-bash-5.2p37.drv
