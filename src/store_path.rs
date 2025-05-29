@@ -6,7 +6,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const NIX_STORE: &str = "/nix/store";
+/// `/nix/store`
+pub const NIX_STORE: &str = "/nix/store";
 const HASH_LEN: usize = 32;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

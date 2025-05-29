@@ -4,11 +4,14 @@
 pub mod file;
 /// support for `http://` and `https://` substituters
 pub mod http;
+/// serve debuginfo from your own store
+pub mod local;
 use std::path::Path;
 
 use anyhow::Context;
 use file::FileSubstituter;
 use http::HttpSubstituter;
+use local::LocalStoreSubstituter;
 use reqwest::Url;
 use serde::Deserialize;
 
@@ -72,6 +75,7 @@ pub async fn substituter_from_url(url: &Url) -> anyhow::Result<BoxedSubstituter>
                 .with_context(|| format!("creating an http substituter from {url}"))?;
             Ok(Box::new(substituter))
         }
+        "local" => Ok(Box::new(LocalStoreSubstituter)),
         other => {
             anyhow::bail!(
                 "I don't know how to handle this kind of Substituter: {}",
