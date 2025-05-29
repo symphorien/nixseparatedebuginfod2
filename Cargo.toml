@@ -29,6 +29,7 @@ tracing-chrome = {version = "0.7", optional = true }
 walkdir = "2.5.0"
 compress-tools = { version = "0.15.1", features = ["tokio_support"] }
 http-body-util = "0.1.3"
+nix = { version = "0.30.1", features = ["fs"] }
 
 [dev-dependencies]
 hmac-sha256 = "1"

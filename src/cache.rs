@@ -260,7 +260,7 @@ impl<Key: FetcherCacheKey + 'static, Fetcher: CachableFetcher<Key> + 'static>
         key: &'key LockedCacheEntry<Key, Lock>,
     ) -> anyhow::Result<Option<PathBuf>> {
         let expiration = self.expiration;
-        match tokio::fs::metadata(&key.target).await {
+        match tokio::fs::symlink_metadata(&key.target).await {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(e).context(format!("stat({})", key.target.display())),
             Ok(metadata) => {
@@ -467,6 +467,23 @@ mod tests {
             }
         }
     }
+
+    struct SymlinkFetcher;
+    impl CachableFetcher<String> for SymlinkFetcher {
+        fn fetch<'a>(
+            &'a self,
+            _key: &'a String,
+            into: &'a Path,
+        ) -> impl Future<Output = anyhow::Result<Presence>> + Send {
+            async move {
+                tokio::fs::symlink(Path::new("/dangling should not exist"), into)
+                    .await
+                    .unwrap();
+                Ok(Presence::Found)
+            }
+        }
+    }
+
     #[tokio::test]
     async fn does_not_fetch_twice() {
         let t = tempdir().unwrap();
@@ -507,6 +524,34 @@ mod tests {
         let second = cache.get("key".into()).await.unwrap().unwrap();
         assert_eq!(fetcher.get(), 2);
         assert_eq!(std::fs::read_to_string(second.as_ref()).unwrap(), "2");
+    }
+
+    #[tokio::test]
+    async fn cleanup_expired_symlink() {
+        setup_logging();
+
+        let t = tempdir().unwrap();
+        let cache = FetcherCache::new(t.path().into(), SymlinkFetcher, Duration::ZERO)
+            .await
+            .unwrap();
+        tracing::info!("fetching key first");
+        let first = cache.get("key".into()).await.unwrap().unwrap();
+
+        let first_path = first.as_ref().to_owned();
+        // the fetched thing exists
+        first_path.symlink_metadata().unwrap();
+        drop(first);
+
+        tracing::info!("cleaning up");
+        cache.cleanup().await.unwrap();
+
+        first_path
+            .symlink_metadata()
+            .expect_err("symlink should have been cleaned up");
+
+        tracing::info!("fetching key second");
+        let second = cache.get("key".into()).await.unwrap().unwrap();
+        second.as_ref().symlink_metadata().unwrap();
     }
 
     #[tokio::test]
@@ -559,6 +604,29 @@ mod tests {
         let second = cache.get("key".into()).await.unwrap().unwrap();
         assert_eq!(fetcher.get(), 1);
         assert_eq!(std::fs::read_to_string(second.as_ref()).unwrap(), "1");
+    }
+
+    #[tokio::test]
+    async fn cleanup_not_expired_symlink() {
+        setup_logging();
+
+        let t = tempdir().unwrap();
+        let cache = FetcherCache::new(t.path().into(), SymlinkFetcher, Duration::from_secs(1000))
+            .await
+            .unwrap();
+        tracing::info!("fetching key first");
+        let first = cache.get("key".into()).await.unwrap().unwrap();
+        let first_path = first.as_ref().to_owned();
+        first_path.symlink_metadata().unwrap();
+
+        drop(first);
+        tracing::info!("cleaning up");
+        cache.cleanup().await.unwrap();
+        first_path.symlink_metadata().unwrap();
+
+        tracing::info!("fetching key second");
+        let second = cache.get("key".into()).await.unwrap().unwrap();
+        second.as_ref().symlink_metadata().unwrap();
     }
 
     #[tokio::test]

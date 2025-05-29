@@ -1,9 +1,13 @@
 //! Misc utils
 use std::path::Path;
 use std::pin::pin;
+use std::time::Duration;
 use std::{fmt::Debug, time::SystemTime};
 
+use anyhow::Context;
 use async_compression::tokio::bufread::{XzDecoder, ZstdDecoder};
+use nix::fcntl::AT_FDCWD;
+use nix::sys::time::TimeSpec;
 use pin_project::pin_project;
 use tokio::io::{AsyncBufRead, AsyncRead};
 
@@ -20,9 +24,22 @@ pub enum Presence {
 /// Sets the mtime of this path to current time
 ///
 /// the path must exist.
-pub async fn touch(path: &Path) -> std::io::Result<()> {
-    let std_file = std::fs::File::open(path)?;
-    tokio::task::spawn_blocking(move || std_file.set_modified(SystemTime::now())).await?
+///
+/// does not dereference symlinks
+pub async fn touch(path: &Path) -> anyhow::Result<()> {
+    let copy = path.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        nix::sys::stat::utimensat(
+            AT_FDCWD,
+            &copy,
+            &TimeSpec::UTIME_NOW,
+            &TimeSpec::UTIME_NOW,
+            nix::sys::stat::UtimensatFlags::NoFollowSymlink,
+        )
+    })
+    .await?
+    .with_context(|| format!("touch({})", path.display()))?;
+    Ok(())
 }
 
 #[tokio::test]
@@ -30,14 +47,31 @@ async fn test_touch() {
     let d = tempfile::tempdir().unwrap();
     let f = d.path().join("file");
     std::fs::write(&f, "contents").unwrap();
-    let mtime_before = f.metadata().unwrap().modified().unwrap();
+    let mtime_before = f.symlink_metadata().unwrap().modified().unwrap();
     let time1 = SystemTime::now();
+    std::thread::sleep(Duration::from_millis(20));
     touch(&f).await.unwrap();
+    nix::unistd::sync();
+    std::thread::sleep(Duration::from_millis(20));
     let time2 = SystemTime::now();
-    let mtime_after = f.metadata().unwrap().modified().unwrap();
+    let mtime_after = f.symlink_metadata().unwrap().modified().unwrap();
     assert!(mtime_before <= time1);
     assert!(time1 <= mtime_after);
     assert!(mtime_after <= time2);
+}
+
+#[tokio::test]
+async fn test_touch_symlink() {
+    let d = tempfile::tempdir().unwrap();
+    let l = d.path().join("link");
+    let target = d.path().join("target that does not exist");
+    std::os::unix::fs::symlink(&target, &l).unwrap();
+    let time_before = SystemTime::now();
+    std::thread::sleep(Duration::from_millis(20));
+    touch(&l).await.unwrap();
+    nix::unistd::sync();
+    let mtime_after = l.symlink_metadata().unwrap().modified().unwrap();
+    assert!(dbg!(time_before) <= dbg!(mtime_after));
 }
 
 /// Ensure that `path` does not exists.
