@@ -15,11 +15,11 @@ nix copy ... --to file://...?index-debug-info=true
 then you can run
 
 ```
-cargo run -- --substituter file://...
+cargo run -- --substituter file://... --expiration "1 day"
 ```
 or
 ```
-cargo run -- --substituter https://cache.nixos.org
+cargo run -- --substituter https://cache.nixos.org --expiration "1 day"
 ```
 
 and set the environment variable `DEBUGINFOD_URLS=http://127.0.0.1:1949`.
@@ -27,6 +27,8 @@ and set the environment variable `DEBUGINFOD_URLS=http://127.0.0.1:1949`.
 ### Warning
 
 Does not protect itself correctly from path traversal attacks.
+
+Does not check signatures from the upstream cache.
 
 ### License
 
