@@ -21,6 +21,10 @@ or
 ```
 cargo run -- --substituter https://cache.nixos.org --expiration "1 day"
 ```
+or
+```
+cargo run -- --substituter local: --expiration "1 day"
+```
 
 and set the environment variable `DEBUGINFOD_URLS=http://127.0.0.1:1949`.
 
