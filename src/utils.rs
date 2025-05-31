@@ -1,8 +1,7 @@
 //! Misc utils
+use std::fmt::Debug;
 use std::path::Path;
 use std::pin::pin;
-use std::time::Duration;
-use std::{fmt::Debug, time::SystemTime};
 
 use anyhow::Context;
 use async_compression::tokio::bufread::{XzDecoder, ZstdDecoder};
@@ -44,6 +43,8 @@ pub async fn touch(path: &Path) -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn test_touch() {
+    use std::time::Duration;
+    use std::time::SystemTime;
     let d = tempfile::tempdir().unwrap();
     let f = d.path().join("file");
     std::fs::write(&f, "contents").unwrap();
@@ -62,6 +63,8 @@ async fn test_touch() {
 
 #[tokio::test]
 async fn test_touch_symlink() {
+    use std::time::Duration;
+    use std::time::SystemTime;
     let d = tempfile::tempdir().unwrap();
     let l = d.path().join("link");
     let target = d.path().join("target that does not exist");

@@ -334,7 +334,17 @@ impl<Key: FetcherCacheKey + 'static, Fetcher: CachableFetcher<Key> + 'static>
                     }
                 }
             };
-            Ok(result.map(|path| CachedPath::new(path, lock)))
+            match result {
+                None => Ok(None),
+                Some(path) => {
+                    // FIXME: hack to enable returning a symlink to the store instead of copying to the
+                    // cache
+                    let path = tokio::fs::canonicalize(&path)
+                        .await
+                        .with_context(|| format!("canonicalize({})", path.display()))?;
+                    Ok(Some(CachedPath::new(path, lock)))
+                }
+            }
         };
         future.instrument(span)
     }
@@ -476,7 +486,7 @@ mod tests {
             into: &'a Path,
         ) -> impl Future<Output = anyhow::Result<Presence>> + Send {
             async move {
-                tokio::fs::symlink(Path::new("/dangling should not exist"), into)
+                tokio::fs::symlink(Path::new("/dev/null"), into)
                     .await
                     .unwrap();
                 Ok(Presence::Found)
@@ -526,6 +536,13 @@ mod tests {
         assert_eq!(std::fs::read_to_string(second.as_ref()).unwrap(), "2");
     }
 
+    fn count_elements_in_dir(dir: &Path) -> usize {
+        walkdir::WalkDir::new(dir)
+            .into_iter()
+            .map(|e| e.unwrap())
+            .count()
+    }
+
     #[tokio::test]
     async fn cleanup_expired_symlink() {
         setup_logging();
@@ -534,24 +551,21 @@ mod tests {
         let cache = FetcherCache::new(t.path().into(), SymlinkFetcher, Duration::ZERO)
             .await
             .unwrap();
+        let n1 = count_elements_in_dir(t.path());
         tracing::info!("fetching key first");
         let first = cache.get("key".into()).await.unwrap().unwrap();
+        assert_eq!(count_elements_in_dir(t.path()), n1 + 1);
 
-        let first_path = first.as_ref().to_owned();
-        // the fetched thing exists
-        first_path.symlink_metadata().unwrap();
         drop(first);
 
         tracing::info!("cleaning up");
         cache.cleanup().await.unwrap();
 
-        first_path
-            .symlink_metadata()
-            .expect_err("symlink should have been cleaned up");
+        assert_eq!(count_elements_in_dir(t.path()), n1);
 
         tracing::info!("fetching key second");
-        let second = cache.get("key".into()).await.unwrap().unwrap();
-        second.as_ref().symlink_metadata().unwrap();
+        let _second = cache.get("key".into()).await.unwrap().unwrap();
+        assert_eq!(count_elements_in_dir(t.path()), n1 + 1);
     }
 
     #[tokio::test]
