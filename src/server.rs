@@ -14,6 +14,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{routing::get, Router};
 use http::header::{HeaderMap, CONTENT_LENGTH};
+use std::fmt::Debug;
 use std::os::unix::prelude::MetadataExt;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -22,6 +23,7 @@ use tokio_util::io::ReaderStream;
 use crate::build_id::BuildId;
 use crate::debuginfod::Debuginfod;
 use crate::substituter::substituter_from_url;
+use crate::vfs::AsFile;
 use crate::Options;
 
 #[derive(Clone)]
@@ -32,21 +34,21 @@ struct ServerState {
 /// Serve the content of this file, or an appropriate error.
 ///
 /// If the file is None, serve 404 not found.
-async fn unwrap_file<T: AsRef<std::path::Path>>(
+async fn unwrap_file<T: AsFile + Debug>(
     path: anyhow::Result<Option<T>>,
 ) -> Result<(HeaderMap, Body), (StatusCode, String)> {
     let response = match path {
-        Ok(Some(p)) => {
-            match tokio::fs::File::open(p.as_ref()).await {
+        Ok(Some(ref p)) => {
+            match p.open().await {
                 Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("{:#}", e))),
                 Ok(file) => {
                     let mut headers = HeaderMap::new();
-                    if let Ok(metadata) = p.as_ref().metadata() {
+                    if let Ok(metadata) = file.metadata().await {
                         if let Ok(value) = metadata.size().to_string().parse() {
                             headers.insert(CONTENT_LENGTH, value);
                         }
                     }
-                    tracing::info!("returning {}", p.as_ref().display());
+                    tracing::info!("returning {:?}", &path);
                     // convert the `AsyncRead` into a `Stream`
                     let stream = ReaderStream::new(file);
                     // convert the `Stream` into an `axum::body::HttpBody`

@@ -31,6 +31,7 @@ pub mod source_selection;
 pub mod store_path;
 pub mod substituter;
 pub mod utils;
+pub mod vfs;
 
 #[cfg(test)]
 pub mod test_utils;

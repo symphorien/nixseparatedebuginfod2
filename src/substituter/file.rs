@@ -199,7 +199,8 @@ async fn test_build_id_to_debug_output() {
     assert_eq!(
         file_sha256(
             &into.join("lib/debug/.build-id/48/3bd7f7229bdb06462222e1e353e4f37e15c293.debug")
-        ),
+        )
+        .await,
         "e8bcbed1f80e8fcaeb622ad1c1c77a526047ace2f73b75ef1128b47a6d317bb0"
     );
 }
@@ -226,7 +227,7 @@ async fn test_fetch_store_path() {
         Presence::Found
     );
     assert_eq!(
-        file_sha256(&into.join("bin/make")),
+        file_sha256(&into.join("bin/make")).await,
         "a7942bdec982d11d0467e84743bee92138038e7a38f37ec08e5cc6fa5e3d18f3"
     );
 }

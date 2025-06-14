@@ -16,7 +16,10 @@ use async_lock::{RwLock, RwLockReadGuardArc, RwLockUpgradableReadGuardArc, RwLoc
 use tracing::{instrument, Instrument, Level};
 use weak_table::WeakValueHashMap;
 
-use crate::utils::{remove_recursively_if_exists, touch, Presence};
+use crate::{
+    utils::{remove_recursively_if_exists, touch, Presence},
+    vfs::RestrictedPath,
+};
 
 /// Fetchers are called to writer in a directory there.
 ///
@@ -89,64 +92,9 @@ pub trait CachableFetcher<Key: FetcherCacheKey>: Send + Sync {
     ) -> impl Future<Output = anyhow::Result<Presence>> + Send;
 }
 
-/// Like [`Path`] but ensures that the path is not modified until dropped.
+/// A lock that prevents a temporary directory from being removed
 #[derive(Clone)]
-pub struct CachedPath {
-    path: PathBuf,
-    lock: Arc<RwLockReadGuardArc<()>>,
-}
-
-impl Debug for CachedPath {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("CachedPath")
-            .field(&self.path.display())
-            .finish()
-    }
-}
-
-impl AsRef<Path> for CachedPath {
-    fn as_ref(&self) -> &Path {
-        self.path.as_ref()
-    }
-}
-
-impl CachedPath {
-    /// Wrapper around [`Path::join`].
-    ///
-    /// if rest is the really empty path, returns the path unchanged
-    ///
-    /// FIXME: guard against escaping
-    pub fn join<T: AsRef<Path>>(self, rest: T) -> Self {
-        let path = rest.as_ref();
-        if path == Path::new("") {
-            self
-        } else {
-            Self {
-                path: self.path.join(path),
-                lock: self.lock,
-            }
-        }
-    }
-
-    /// FIXME: guard against escaping
-    pub fn parent(self) -> anyhow::Result<Self> {
-        let path = self
-            .path
-            .parent()
-            .ok_or_else(|| anyhow::anyhow!("{} has no parent", self.path.display()))?;
-        Ok(Self {
-            path: path.to_path_buf(),
-            lock: self.lock,
-        })
-    }
-
-    fn new<Key: FetcherCacheKey>(path: PathBuf, lock: ReadLockedCacheEntry<Key>) -> Self {
-        Self {
-            path,
-            lock: Arc::new(lock.lock),
-        }
-    }
-}
+pub struct CachedPathLock(#[allow(dead_code)] Arc<RwLockReadGuardArc<()>>);
 
 /// Wraps a [`CachableFetcher`] so that calling [`FetcherCache::get`] only calls
 /// [`CachableFetcher::fetch`] once.
@@ -182,7 +130,7 @@ impl<Key: FetcherCacheKey + 'static, Fetcher: CachableFetcher<Key> + 'static>
         let cache = Self {
             root_dir,
             fetcher,
-            phantom_key: PhantomData::default(),
+            phantom_key: PhantomData,
             locks: Default::default(),
             expiration,
         };
@@ -310,7 +258,7 @@ impl<Key: FetcherCacheKey + 'static, Fetcher: CachableFetcher<Key> + 'static>
     pub fn get(
         &self,
         key: Key,
-    ) -> impl Future<Output = anyhow::Result<Option<CachedPath>>> + Send + use<'_, Key, Fetcher>
+    ) -> impl Future<Output = anyhow::Result<Option<RestrictedPath>>> + Send + use<'_, Key, Fetcher>
     {
         let span = tracing::trace_span!("get", key = key.as_key());
         let future = async move {
@@ -339,10 +287,9 @@ impl<Key: FetcherCacheKey + 'static, Fetcher: CachableFetcher<Key> + 'static>
                 Some(path) => {
                     // FIXME: hack to enable returning a symlink to the store instead of copying to the
                     // cache
-                    let path = tokio::fs::canonicalize(&path)
-                        .await
-                        .with_context(|| format!("canonicalize({})", path.display()))?;
-                    Ok(Some(CachedPath::new(path, lock)))
+                    Ok(Some(
+                        RestrictedPath::new(path, CachedPathLock(lock.lock.into())).await?,
+                    ))
                 }
             }
         };
@@ -438,8 +385,9 @@ mod tests {
     use std::sync::atomic::AtomicU32;
 
     use tempfile::tempdir;
+    use tokio::io::AsyncReadExt;
 
-    use crate::test_utils::setup_logging;
+    use crate::{test_utils::setup_logging, vfs::AsFile};
 
     use super::*;
 
@@ -494,6 +442,21 @@ mod tests {
         }
     }
 
+    async fn read_restricted(r: &RestrictedPath) -> String {
+        let mut file = r
+            .clone()
+            .resolve_inside_root()
+            .await
+            .unwrap()
+            .unwrap()
+            .open()
+            .await
+            .unwrap();
+        let mut buf = String::new();
+        file.read_to_string(&mut buf).await.unwrap();
+        buf
+    }
+
     #[tokio::test]
     async fn does_not_fetch_twice() {
         let t = tempdir().unwrap();
@@ -503,11 +466,10 @@ mod tests {
             .unwrap();
         let first = cache.get("key".into()).await.unwrap().unwrap();
         assert_eq!(fetcher.get(), 1);
-        assert_eq!(std::fs::read_to_string(first.as_ref()).unwrap(), "1");
+        assert_eq!(read_restricted(&first).await, "1");
         let second = cache.get("key".into()).await.unwrap().unwrap();
         assert_eq!(fetcher.get(), 1);
-        assert_eq!(std::fs::read_to_string(second.as_ref()).unwrap(), "1");
-        assert_eq!(first.as_ref(), second.as_ref());
+        assert_eq!(read_restricted(&second).await, "1");
     }
 
     #[tokio::test]
@@ -522,21 +484,22 @@ mod tests {
         tracing::info!("fetching key first");
         let first = cache.get("key".into()).await.unwrap().unwrap();
         assert_eq!(fetcher.get(), 1);
-        assert_eq!(std::fs::read_to_string(first.as_ref()).unwrap(), "1");
+        assert_eq!(read_restricted(&first).await, "1");
 
-        let first_path = first.as_ref().to_owned();
+        let n1 = count_elements_in_dir(t.path());
         drop(first);
         tracing::info!("cleaning up");
         cache.cleanup().await.unwrap();
-        assert!(!first_path.exists());
+        assert_eq!(count_elements_in_dir(t.path()), n1 - 1);
 
         tracing::info!("fetching key second");
         let second = cache.get("key".into()).await.unwrap().unwrap();
         assert_eq!(fetcher.get(), 2);
-        assert_eq!(std::fs::read_to_string(second.as_ref()).unwrap(), "2");
+        assert_eq!(read_restricted(&second).await, "2");
     }
 
     fn count_elements_in_dir(dir: &Path) -> usize {
+        #[allow(clippy::suspicious_map)]
         walkdir::WalkDir::new(dir)
             .into_iter()
             .map(|e| e.unwrap())
@@ -580,18 +543,20 @@ mod tests {
         tracing::info!("fetching key first");
         let first = cache.get("key".into()).await.unwrap().unwrap();
         assert_eq!(fetcher.get(), 1);
-        assert_eq!(std::fs::read_to_string(first.as_ref()).unwrap(), "1");
+        assert_eq!(read_restricted(&first).await, "1");
 
         tracing::info!("cleaning up");
+        let n1 = count_elements_in_dir(t.path());
         cache.cleanup().await.unwrap();
-        assert!(first.as_ref().exists());
+        let n2 = count_elements_in_dir(t.path());
+        assert_eq!(n2, n1);
 
         drop(first);
 
         tracing::info!("fetching key second");
         let second = cache.get("key".into()).await.unwrap().unwrap();
         assert_eq!(fetcher.get(), 1);
-        assert_eq!(std::fs::read_to_string(second.as_ref()).unwrap(), "1");
+        assert_eq!(read_restricted(&second).await, "1");
     }
 
     #[tokio::test]
@@ -606,18 +571,19 @@ mod tests {
         tracing::info!("fetching key first");
         let first = cache.get("key".into()).await.unwrap().unwrap();
         assert_eq!(fetcher.get(), 1);
-        assert_eq!(std::fs::read_to_string(first.as_ref()).unwrap(), "1");
+        assert_eq!(read_restricted(&first).await, "1");
 
-        let first_path = first.as_ref().to_owned();
+        let n1 = count_elements_in_dir(t.path());
         drop(first);
         tracing::info!("cleaning up");
         cache.cleanup().await.unwrap();
-        assert!(first_path.exists());
+        let n2 = count_elements_in_dir(t.path());
+        assert_eq!(n2, n1);
 
         tracing::info!("fetching key second");
         let second = cache.get("key".into()).await.unwrap().unwrap();
         assert_eq!(fetcher.get(), 1);
-        assert_eq!(std::fs::read_to_string(second.as_ref()).unwrap(), "1");
+        assert_eq!(read_restricted(&second).await, "1");
     }
 
     #[tokio::test]
@@ -630,17 +596,18 @@ mod tests {
             .unwrap();
         tracing::info!("fetching key first");
         let first = cache.get("key".into()).await.unwrap().unwrap();
-        let first_path = first.as_ref().to_owned();
-        first_path.symlink_metadata().unwrap();
+        assert_eq!(read_restricted(&first).await, "");
 
+        let n1 = count_elements_in_dir(t.path());
         drop(first);
         tracing::info!("cleaning up");
         cache.cleanup().await.unwrap();
-        first_path.symlink_metadata().unwrap();
+        let n2 = count_elements_in_dir(t.path());
+        assert_eq!(n2, n1);
 
         tracing::info!("fetching key second");
         let second = cache.get("key".into()).await.unwrap().unwrap();
-        second.as_ref().symlink_metadata().unwrap();
+        assert_eq!(read_restricted(&second).await, "");
     }
 
     #[tokio::test]
@@ -661,8 +628,8 @@ mod tests {
                 tracing::info!("starting {}", &description);
                 let path = cache.get(key).await.unwrap().unwrap();
                 tracing::info!("got a result for {}", &description);
-                tokio::fs::metadata(path.as_ref()).await.unwrap();
-                tracing::info!("{} -> {}", &description, path.as_ref().display());
+                read_restricted(&path).await;
+                tracing::info!("{} -> {path:?}", &description);
                 description
             }
         };
@@ -701,18 +668,20 @@ mod tests {
         tracing::info!("fetching key first");
         let first = cache.get("key".into()).await.unwrap().unwrap();
         assert_eq!(fetcher.get(), 1);
-        assert_eq!(std::fs::read_to_string(first.as_ref()).unwrap(), "1");
+        assert_eq!(read_restricted(&first).await, "1");
 
-        let first_path = first.as_ref().to_owned();
+        let n1 = count_elements_in_dir(t.path());
         drop(first);
         tracing::info!("waiting for cleanup");
         // apparently it takes time for the task to actually spawn so let's have some margin
         tokio::time::sleep(Duration::from_millis(50)).await;
-        assert!(!first_path.exists());
+        let n2 = count_elements_in_dir(t.path());
+        // first should have been removed
+        assert_eq!(n2, n1 - 1);
 
         tracing::info!("fetching key second");
         let second = cache.get("key".into()).await.unwrap().unwrap();
         assert_eq!(fetcher.get(), 2);
-        assert_eq!(std::fs::read_to_string(second.as_ref()).unwrap(), "2");
+        assert_eq!(read_restricted(&second).await, "2");
     }
 }

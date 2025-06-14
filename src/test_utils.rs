@@ -1,7 +1,7 @@
 use reqwest::Url;
 ///! Functions used in tests only
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{LazyLock, Once};
 use tracing::Level;
 use tracing_subscriber::filter;
@@ -10,13 +10,15 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::Layer;
 
+use crate::vfs::AsFile;
+
 /// Returns the sha256sum of this file in a lowecase hex string
-pub fn file_sha256(path: &Path) -> String {
-    let mut file = std::fs::File::open(path).unwrap();
+pub async fn file_sha256<F: AsFile>(file: F) -> String {
+    let mut std_file = file.open().await.unwrap().into_std().await;
     let mut buf = [0; 4096];
     let mut hash = hmac_sha256::Hash::new();
     loop {
-        let n = file.read(&mut buf).unwrap();
+        let n = std_file.read(&mut buf).unwrap();
         if n == 0 {
             break;
         } else {

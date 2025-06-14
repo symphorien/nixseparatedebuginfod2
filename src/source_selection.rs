@@ -7,33 +7,24 @@ use std::{
 
 use tracing::Level;
 
+use crate::vfs::WalkableDirectory;
+
 /// Returns the set of files in this directory with the specified file name
 ///
 /// Paths are returned relative to `dir`.
 ///
 /// Errors are ignored.
-fn find_file_in_dir(dir: &Path, file_name: &OsStr) -> Vec<PathBuf> {
+fn find_file_in_dir<T: WalkableDirectory>(dir: &T, file_name: &OsStr) -> Vec<PathBuf> {
     let mut result = Vec::new();
-    for file in walkdir::WalkDir::new(dir) {
+    for file in dir.list_files_recursively() {
         match file {
             Err(e) => {
-                tracing::warn!("failed to walk source {}: {:#}", dir.display(), e);
+                tracing::warn!("failed to walk source {dir:?}: {:#}", e);
                 continue;
             }
             Ok(f) => {
-                if f.file_name() == file_name {
-                    let path = f.path();
-                    match path.strip_prefix(dir) {
-                        Ok(relative_path) => result.push(relative_path.to_path_buf()),
-                        Err(e) => {
-                            tracing::warn!(
-                                "walkdir({}) yielded {} which is not a suffix of {}: {e}",
-                                dir.display(),
-                                path.display(),
-                                dir.display()
-                            );
-                        }
-                    }
+                if f.file_name() == Some(file_name) {
+                    result.push(f)
                 }
             }
         }
@@ -98,9 +89,9 @@ pub enum SourceMatch {
 ///
 /// Returns Err if several file match and we don't know which one is the best one.
 #[tracing::instrument(level=Level::DEBUG)]
-pub fn get_file_for_source(
-    source_dir: &Path,
-    overlay_dir: &Path,
+pub fn get_file_for_source<T: WalkableDirectory>(
+    source_dir: &T,
+    overlay_dir: &T,
     request: &Path,
 ) -> anyhow::Result<Option<SourceMatch>> {
     let Some(filename) = request.file_name() else {
@@ -147,8 +138,8 @@ fn get_file_for_source_simple() {
     let dir = make_test_source_path(vec!["soft-version/src/main.c", "soft-version/src/Makefile"]);
     let overlay = make_test_source_path(vec![]);
     let res = get_file_for_source(
-        dir.path(),
-        overlay.path(),
+        &dir.path(),
+        &overlay.path(),
         "/source/soft-version/src/main.c".as_ref(),
     )
     .unwrap()
@@ -164,8 +155,8 @@ fn get_file_for_source_different_dir() {
     let dir = make_test_source_path(vec!["lib/core-net/network.c", "lib/plat/optee/network.c"]);
     let overlay = make_test_source_path(vec![]);
     let res = get_file_for_source(
-        dir.path(),
-        overlay.path(),
+        &dir.path(),
+        &overlay.path(),
         "/build/source/lib/core-net/network.c".as_ref(),
     )
     .unwrap()
@@ -184,8 +175,8 @@ fn get_file_for_source_regression_pr_7() {
     ]);
     let overlay = make_test_source_path(vec![]);
     let res = get_file_for_source(
-        dir.path(),
-        overlay.path(),
+        &dir.path(),
+        &overlay.path(),
         "build/source/lib/core-net/network.c".as_ref(),
     )
     .unwrap()
@@ -204,8 +195,8 @@ fn get_file_for_source_no_right_filename() {
     ]);
     let overlay = make_test_source_path(vec![]);
     let res = get_file_for_source(
-        dir.path(),
-        overlay.path(),
+        &dir.path(),
+        &overlay.path(),
         "build/source/lib/core-net/somethingelse.c".as_ref(),
     );
     assert_eq!(res.unwrap(), None);
@@ -220,8 +211,8 @@ fn get_file_for_source_glibc() {
     ]);
     let overlay = make_test_source_path(vec![]);
     let res = get_file_for_source(
-        dir.path(),
-        overlay.path(),
+        &dir.path(),
+        &overlay.path(),
         "/build/glibc-2.37/io/../sysdeps/unix/sysv/linux/openat64.c".as_ref(),
     );
     assert_eq!(
@@ -237,8 +228,8 @@ fn get_file_for_source_misleading_dir() {
     let dir = make_test_source_path(vec!["store/store/wrong/dir/file", "good/dir/store/file"]);
     let overlay = make_test_source_path(vec![]);
     let res = get_file_for_source(
-        dir.path(),
-        overlay.path(),
+        &dir.path(),
+        &overlay.path(),
         "/build/project/store/file".as_ref(),
     );
     assert_eq!(
@@ -257,8 +248,8 @@ fn get_file_for_source_ambiguous() {
     let dir = make_test_source_path(sources.clone());
     let overlay = make_test_source_path(vec![]);
     let res = get_file_for_source(
-        dir.path(),
-        overlay.path(),
+        &dir.path(),
+        &overlay.path(),
         "/build/glibc-2.37/fakeexample/openat64.c".as_ref(),
     );
     assert!(res.is_err());
@@ -275,8 +266,8 @@ fn get_file_for_source_overlay_nothing_to_do() {
     let dir = make_test_source_path(vec!["lib/core-net/network.c", "lib/plat/optee/network.c"]);
     let overlay = make_test_source_path(vec!["lib/different"]);
     let res = get_file_for_source(
-        dir.path(),
-        overlay.path(),
+        &dir.path(),
+        &overlay.path(),
         "/build/source/lib/core-net/network.c".as_ref(),
     )
     .unwrap()
@@ -292,8 +283,8 @@ fn get_file_for_source_overlay_easy() {
     let dir = make_test_source_path(vec!["lib/core-net/network.c", "lib/plat/optee/network.c"]);
     let overlay = make_test_source_path(vec!["source/lib/core-net/network.c"]);
     let res = get_file_for_source(
-        dir.path(),
-        overlay.path(),
+        &dir.path(),
+        &overlay.path(),
         "/build/source/lib/core-net/network.c".as_ref(),
     )
     .unwrap()
@@ -309,8 +300,8 @@ fn get_file_for_source_overlay_other_path_patched() {
     let dir = make_test_source_path(vec!["lib/core-net/network.c", "lib/plat/optee/network.c"]);
     let overlay = make_test_source_path(vec!["source/lib/core-net/network.c"]);
     let res = get_file_for_source(
-        dir.path(),
-        overlay.path(),
+        &dir.path(),
+        &overlay.path(),
         "/build/source/lib/plat/optee/network.c".as_ref(),
     )
     .unwrap()
@@ -329,8 +320,8 @@ fn get_file_for_source_overlay_choice() {
         "source/lib/plat/optee/network.c",
     ]);
     let res = get_file_for_source(
-        dir.path(),
-        overlay.path(),
+        &dir.path(),
+        &overlay.path(),
         "/build/source/lib/plat/optee/network.c".as_ref(),
     )
     .unwrap()

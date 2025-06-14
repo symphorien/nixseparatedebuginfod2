@@ -1,31 +1,39 @@
 //! Unpacking source archives
 
-use std::path::PathBuf;
-
 use anyhow::Context;
 
 use crate::{
     build_id::BuildId,
     cache::{CachableFetcher, FetcherCacheKey},
     utils::Presence,
+    vfs::AsFile,
 };
 
+use std::fmt::Debug;
+
 /// An archive (tarball, zip, etc) to be unpacked
-#[derive(Debug, Clone)]
 pub struct SourceArchive {
     /// path of the file
-    path: PathBuf,
+    file: Box<dyn AsFile + Send + Sync>,
     /// BuildId of which this file is the source
     ///
     /// it is assumed that there is at most one source archive per build id
     build_id: BuildId,
 }
 
+impl Debug for SourceArchive {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SourceArchive")
+            .field("build_id", &self.build_id)
+            .finish()
+    }
+}
+
 impl SourceArchive {
     /// two source archives from the same build_id will be considered the same
-    pub fn new<P: Into<PathBuf>>(path: P, build_id: BuildId) -> Self {
+    pub fn new<F: AsFile + Send + Sync + 'static>(file: F, build_id: BuildId) -> Self {
         Self {
-            path: path.into(),
+            file: Box::new(file),
             build_id,
         }
     }
@@ -47,16 +55,18 @@ impl CachableFetcher<SourceArchive> for ArchiveUnpacker {
         key: &'a SourceArchive,
         into: &'a std::path::Path,
     ) -> anyhow::Result<crate::utils::Presence> {
-        let mut file = tokio::fs::File::open(&key.path)
+        let mut file = key
+            .file
+            .open()
             .await
-            .with_context(|| format!("opening {} for unpacking", &key.path.display()))?;
+            .with_context(|| format!("opening {key:?} for unpacking"))?;
         compress_tools::tokio_support::uncompress_archive(
             &mut file,
             into,
             compress_tools::Ownership::Ignore,
         )
         .await
-        .with_context(|| format!("unpacking {}", &key.path.display()))?;
+        .with_context(|| format!("unpacking {key:?}"))?;
         Ok(Presence::Found)
     }
 }

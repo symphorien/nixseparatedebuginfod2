@@ -165,7 +165,7 @@ mod tests {
             Presence::Found
         );
         assert_eq!(
-            file_sha256(&into.join("src/getopt.c")),
+            file_sha256(&into.join("src/getopt.c")).await,
             "a0e40f26252d08a127b7c6fb16499447c543252f883154322207fa8b1d8d460a"
         );
     }
@@ -223,7 +223,8 @@ mod tests {
         assert_eq!(
             file_sha256(
                 &into.join("lib/debug/.build-id/48/3bd7f7229bdb06462222e1e353e4f37e15c293.debug")
-            ),
+            )
+            .await,
             "e8bcbed1f80e8fcaeb622ad1c1c77a526047ace2f73b75ef1128b47a6d317bb0"
         );
     }
