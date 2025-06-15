@@ -215,7 +215,7 @@ impl RestrictedPath {
     /// * not escape the original root
     /// * be store paths, in which case `resolver` is called an the symlink is resolved in
     /// the resulting `RestrictedPath`
-    #[tracing::instrument(level=Level::TRACE, skip(resolver), ret)]
+    #[tracing::instrument(level=Level::TRACE, skip(resolver))]
     pub async fn resolve<
         F: Future<Output = anyhow::Result<Option<RestrictedPath>>> + Sized,
         R: Fn(StorePath) -> F,
@@ -291,11 +291,10 @@ impl RestrictedPath {
                     Ok(path) => {
                         resolved_path.pop();
                         let mut to_be_resolved_ = resolved_path;
-                        if path != Path::new("") {
-                            to_be_resolved_.push(path)
-                        }
-                        if remaining_components.as_path() != Path::new("") {
-                            to_be_resolved_.push(remaining_components.as_path())
+                        to_be_resolved_.push(path);
+                        // do not add a trailing slash when remaining_components is empty
+                        for remaining in remaining_components {
+                            to_be_resolved_.push(remaining)
                         }
                         to_be_resolved = to_be_resolved_;
                         tracing::trace!("symlink points to {}", to_be_resolved.display());
@@ -512,5 +511,127 @@ mod test {
             .unwrap();
         let subject = root.join("b");
         assert!(dbg!(subject.resolve_inside_root().await.unwrap()).is_none())
+    }
+
+    #[tokio::test]
+    async fn test_resolve_parent_of_root() {
+        let d = make_test_dir(vec!["a"], vec![]);
+        let root = RestrictedPath::new("/".into(), CachedPathLock::fake())
+            .await
+            .unwrap();
+        // /.. is supposed to be /
+        let subject = root.join("..").join(d.path()).join("a");
+        let resolved = subject.resolve_inside_root().await.unwrap().unwrap();
+        assert_contains(&resolved, "a").await;
+    }
+
+    #[tokio::test]
+    async fn test_resolve_double_slash() {
+        let d = make_test_dir(vec!["a/b/c/d", "e"], vec![]);
+        let root = RestrictedPath::new(d.path().to_path_buf(), CachedPathLock::fake())
+            .await
+            .unwrap();
+        let subject = root.join("a////../e");
+        let resolved = subject.resolve_inside_root().await.unwrap().unwrap();
+        assert_contains(dbg!(&resolved), "e").await;
+    }
+
+    #[tokio::test]
+    async fn test_resolve_store_symlink_to_dir() {
+        let d2 = make_test_dir(vec!["bin/sl"], vec![]);
+        let d = make_test_dir(
+            vec![],
+            vec![(
+                "a/link",
+                "/nix/store/hawy0gnlpv0j6h8a3szfgxfjvn84890h-sl-5.05",
+            )],
+        );
+        let root = RestrictedPath::new(d.path().to_path_buf(), CachedPathLock::fake())
+            .await
+            .unwrap();
+        let subject = root.join("a/link/bin/sl");
+        let d2path = d2.path();
+        let resolver = |storepath: StorePath| async move {
+            assert_eq!(
+                storepath.as_ref().as_os_str(),
+                "/nix/store/hawy0gnlpv0j6h8a3szfgxfjvn84890h-sl-5.05/bin/sl"
+            );
+            Ok(Some(
+                RestrictedPath::new(d2path.to_path_buf(), CachedPathLock::fake())
+                    .await
+                    .unwrap(),
+            ))
+        };
+        let resolved = subject.resolve(resolver).await.unwrap().unwrap();
+        assert_contains(dbg!(&resolved), "bin/sl").await;
+    }
+
+    #[tokio::test]
+    async fn test_resolve_store_symlink_to_file() {
+        let d2 = make_test_dir(vec!["file"], vec![]);
+        let d = make_test_dir(
+            vec![],
+            vec![(
+                "a/link",
+                "/nix/store/hawy0gnlpv0j6h8a3szfgxfjvn84890h-file.tar.gz",
+            )],
+        );
+        let root = RestrictedPath::new(d.path().to_path_buf(), CachedPathLock::fake())
+            .await
+            .unwrap();
+        let subject = root.join("a/link");
+        let d2path = d2.path();
+        let resolver = |storepath: StorePath| async move {
+            // path equality is blind to trailing slashes, so compare OsStr
+            assert_eq!(
+                storepath.as_ref().as_os_str(),
+                "/nix/store/hawy0gnlpv0j6h8a3szfgxfjvn84890h-file.tar.gz"
+            );
+            Ok(Some(
+                RestrictedPath::new(d2path.join("file"), CachedPathLock::fake())
+                    .await
+                    .unwrap(),
+            ))
+        };
+        let resolved = subject.resolve(resolver).await.unwrap().unwrap();
+        assert_contains(dbg!(&resolved), "file").await;
+    }
+
+    #[tokio::test]
+    async fn test_resolve_store_symlink_to_missing_path() {
+        let d = make_test_dir(
+            vec![],
+            vec![(
+                "a/link",
+                "/nix/store/hawy0gnlpv0j6h8a3szfgxfjvn84890h-sl-5.05",
+            )],
+        );
+        let root = RestrictedPath::new(d.path().to_path_buf(), CachedPathLock::fake())
+            .await
+            .unwrap();
+        let subject = root.join("a/link/bin/sl");
+        let resolver = |_storepath: StorePath| async move { Ok(None) };
+        let resolved = subject.resolve(resolver).await.unwrap();
+        assert!(dbg!(resolved).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_store_symlink_to_dir_to_escape() {
+        let d2 = make_test_dir(vec!["bin/sl"], vec![]);
+        let d = make_test_dir(vec![], vec![("a/link", "/nix/store/hawy0gnlpv0j6h8a3szfgxfjvn84890h-sl-5.05/../hawy0gnlpv0j6h8a3szfgxfjvn84890h-sl-5.05")]);
+        let root = RestrictedPath::new(d.path().to_path_buf(), CachedPathLock::fake())
+            .await
+            .unwrap();
+        let subject = root.join("a/link/bin/sl");
+        let d2path = d2.path();
+        let resolver = |storepath: StorePath| async move {
+            assert_eq!(storepath.as_ref().as_os_str(), "/nix/store/hawy0gnlpv0j6h8a3szfgxfjvn84890h-sl-5.05/../hawy0gnlpv0j6h8a3szfgxfjvn84890h-sl-5.05/bin/sl");
+            Ok(Some(
+                RestrictedPath::new(d2path.to_path_buf(), CachedPathLock::fake())
+                    .await
+                    .unwrap(),
+            ))
+        };
+        subject.resolve(resolver).await.unwrap_err();
     }
 }
