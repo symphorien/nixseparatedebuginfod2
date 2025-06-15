@@ -68,6 +68,11 @@ impl StorePath {
             .strip_prefix(self.name())
             .unwrap()
     }
+
+    /// Returns the `/nix/store/hash-name` part of the store path, without any subdirectory
+    pub fn root(&self) -> StorePath {
+        StorePath(Path::new(NIX_STORE).join(self.name()))
+    }
 }
 
 #[test]
@@ -110,6 +115,20 @@ fn test_store_path_name() {
     ))
     .unwrap();
     assert_eq!(path.name(), "hbqzhmrscihnl9vgvw9nqhlzc64r1gwl-sl-5.05");
+}
+#[test]
+fn test_store_path_root() {
+    let path = StorePath::new(Path::new(
+        "/nix/store/hbqzhmrscihnl9vgvw9nqhlzc64r1gwl-sl-5.05/bin/sl",
+    ))
+    .unwrap();
+    assert_eq!(
+        path.root(),
+        StorePath::new(Path::new(
+            "/nix/store/hbqzhmrscihnl9vgvw9nqhlzc64r1gwl-sl-5.05"
+        ))
+        .unwrap()
+    );
 }
 #[test]
 fn test_store_path_hash() {

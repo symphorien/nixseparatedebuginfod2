@@ -33,6 +33,11 @@ pub trait Substituter {
     ///
     /// `into` should be root of the extracted nar, ie contains `bin`, `lib`, etc rather than
     /// `nix/store/hash-name`.
+    ///
+    /// If `store_path` is a subdirectory of the full store path, for example
+    /// `/nix/store/hash-name/foo/bar` rather than just `/nix/store/hash-name`,
+    /// then the `foo/bar` part must be ignored and all of `/nix/store/hash-name`
+    /// must be extracted into `into`.
     async fn fetch_store_path(
         &self,
         store_path: &StorePath,

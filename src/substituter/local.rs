@@ -52,6 +52,7 @@ impl Substituter for LocalStoreSubstituter {
         store_path: &StorePath,
         into: &std::path::Path,
     ) -> anyhow::Result<Presence> {
+        let store_path = store_path.root();
         match tokio::fs::metadata(store_path.as_ref()).await {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Presence::NotFound),
             Err(e) => Err(e).context(format!("stat({})", store_path.as_ref().display())),

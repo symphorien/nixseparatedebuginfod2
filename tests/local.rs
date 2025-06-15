@@ -75,6 +75,7 @@ impl Server {
         std::fs::create_dir(cache.path().join("server")).unwrap();
         std::fs::create_dir(cache.path().join("client")).unwrap();
         let mut command = Command::new("bwrap");
+        command.env("RUST_LOG", "nixseparatedebuginfod2=trace,tower_http=debug");
         command
             .args([
                 "--bind",
