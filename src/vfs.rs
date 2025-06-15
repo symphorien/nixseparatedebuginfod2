@@ -274,9 +274,14 @@ impl RestrictedPath {
                     }
                     Ok(path) => {
                         resolved_path.pop();
-                        to_be_resolved = resolved_path
-                            .join(path)
-                            .join(remaining_components.as_path());
+                        let mut to_be_resolved_ = resolved_path;
+                        if path != Path::new("") {
+                            to_be_resolved_.push(path)
+                        }
+                        if remaining_components.as_path() != Path::new("") {
+                            to_be_resolved_.push(remaining_components.as_path())
+                        }
+                        to_be_resolved = to_be_resolved_;
                         depth += 1;
                         if to_be_resolved.starts_with(NIX_STORE) {
                             let store_path =
