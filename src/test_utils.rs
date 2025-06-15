@@ -1,5 +1,6 @@
+//! Functions used in tests only
+
 use reqwest::Url;
-///! Functions used in tests only
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::{LazyLock, Once};
