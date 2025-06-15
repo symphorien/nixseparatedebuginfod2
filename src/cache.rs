@@ -96,6 +96,14 @@ pub trait CachableFetcher<Key: FetcherCacheKey>: Send + Sync {
 #[derive(Clone)]
 pub struct CachedPathLock(#[allow(dead_code)] Arc<RwLockReadGuardArc<()>>);
 
+#[cfg(test)]
+impl CachedPathLock {
+    pub fn fake() -> Self {
+        let lock = Arc::new(RwLock::new(()));
+        CachedPathLock(Arc::new(RwLock::read_arc_blocking(&lock)))
+    }
+}
+
 /// Wraps a [`CachableFetcher`] so that calling [`FetcherCache::get`] only calls
 /// [`CachableFetcher::fetch`] once.
 pub struct FetcherCache<Key: FetcherCacheKey, Fetcher: CachableFetcher<Key>> {
