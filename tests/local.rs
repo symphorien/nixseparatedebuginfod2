@@ -162,12 +162,12 @@ pub fn file_sha256(file: &Path) -> String {
 fn local_debuginfo_nominal() {
     let store = prepare_store();
     let server = Server::new(store.path());
-    // /nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/bin/make
-    let debuginfo = server.request(&["debuginfo", "66b33fee92bf535e40d29622ce45b4bd01bebc1f"]);
-    // /nix/store/w4pl4nw4lygw0sca2q0667fkz5b92lvk-gnumake-4.4.1-debug/lib/debug/make
+    // /nix/store/34j18r2rpi7js1whmvzm9wliad55rilr-gnumake-4.4.1/bin/make
+    let debuginfo = server.request(&["debuginfo", "0e20481820d3b92468102b35a5e4a29a8695c1af"]);
+    // /nix/store/dlkw5480vfxdi21rybli43ii782czp94-gnumake-4.4.1-debug/lib/debug/make
     assert_eq!(
         file_sha256(&debuginfo),
-        "c7d7299291732384a47af188410469be6e6cdac3ad8652b93947462489d7f2f9"
+        "8f62cc563915e10f870bd7991ad88e535f842a8dd7afcba30c597b3bb6e728ad"
     );
 }
 
@@ -175,13 +175,13 @@ fn local_debuginfo_nominal() {
 fn local_source_in_archive_patched() {
     let store = prepare_store();
     let server = Server::new(store.path());
-    // /nix/store/sbrb2ymlvq2bg7v8nf7p7qkqg5q2ks32-gnumake-4.4.1/bin/make
+    // /nix/store/34j18r2rpi7js1whmvzm9wliad55rilr-gnumake-4.4.1/bin/make
     let source = server.request(&[
         "source",
-        "45a9ee3e03d0ab4797561a6668e85a5be6a86262",
+        "0e20481820d3b92468102b35a5e4a29a8695c1af",
         "/build/make-4.4.1/src/job.c",
     ]);
-    // /nix/store/sj8bfxjk8scdkgmlpan0s8cqccf0ny9j-gnumake-4.4.1-debug/src/overlay/make-4.4.1/src/job.c
+    // /nix/store/dlkw5480vfxdi21rybli43ii782czp94-gnumake-4.4.1-debug/src/overlay/make-4.4.1/src/job.c
     assert_eq!(
         file_sha256(dbg!(&source)),
         "65c819269ed09f81de1d1659efb76008f23bb748c805409f1ad5f782d15836df"

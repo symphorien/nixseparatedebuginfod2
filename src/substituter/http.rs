@@ -152,7 +152,7 @@ mod tests {
     async fn test_fetch_store_path_nominal() {
         let substituter = HttpSubstituter::new(HTTP_BINARY_CACHE.clone()).unwrap();
         let store_path = StorePath::new(Path::new(
-            "/nix/store/n11lk1q63864l8vfdl8h8aja1shs3yr7-source/src/getopt.c",
+            "/nix/store/2qw62845796lyx649ck67zbk04pv8xhf-source/src/systemctl/systemctl.c",
         ))
         .unwrap();
         let dir = tempfile::tempdir().unwrap();
@@ -165,8 +165,8 @@ mod tests {
             Presence::Found
         );
         assert_eq!(
-            file_sha256(&into.join("src/getopt.c")).await,
-            "a0e40f26252d08a127b7c6fb16499447c543252f883154322207fa8b1d8d460a"
+            file_sha256(&into.join("src/systemctl/systemctl.c")).await,
+            "402ec408cd95844108e0c93e6bc249b97941a901fbc89ad8d3f45a07c5916708"
         );
     }
 
@@ -174,7 +174,7 @@ mod tests {
     async fn test_fetch_store_path_missing() {
         let substituter = HttpSubstituter::new(HTTP_BINARY_CACHE.clone()).unwrap();
         let store_path = StorePath::new(Path::new(
-            "/nix/store/n11lk1q63oooooooooooooja1shs3yr7-source/src/getopt.c",
+            "/nix/store/n11lk1q63oooooooooooooja1shs3yr7-source/src/systemctl/systemctl.c",
         ))
         .unwrap();
         let dir = tempfile::tempdir().unwrap();
@@ -193,7 +193,7 @@ mod tests {
         let url = Url::parse("https://255.255.255.255/doesnotexist").unwrap();
         let substituter = HttpSubstituter::new(url).unwrap();
         let store_path = StorePath::new(Path::new(
-            "/nix/store/n11lk1q63oooooooooooooja1shs3yr7-source/src/getopt.c",
+            "/nix/store/n11lk1q63oooooooooooooja1shs3yr7-source/src/systemctl/systemctl.c",
         ))
         .unwrap();
         let dir = tempfile::tempdir().unwrap();
@@ -210,10 +210,11 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let into = dir.path().join("target");
+        // /nix/store/pbqih0cmbc4xilscj36m80ardhg6kawp-systemd-minimal-257.6/bin/systemctl
         assert_eq!(
             substituter
                 .build_id_to_debug_output(
-                    &BuildId::new("483bd7f7229bdb06462222e1e353e4f37e15c293").unwrap(),
+                    &BuildId::new("b87e34547e94f167f4b737f3a25955477a485cc7").unwrap(),
                     &into
                 )
                 .await
@@ -222,10 +223,10 @@ mod tests {
         );
         assert_eq!(
             file_sha256(
-                &into.join("lib/debug/.build-id/48/3bd7f7229bdb06462222e1e353e4f37e15c293.debug")
+                &into.join("lib/debug/.build-id/b8/7e34547e94f167f4b737f3a25955477a485cc7.debug")
             )
             .await,
-            "e8bcbed1f80e8fcaeb622ad1c1c77a526047ace2f73b75ef1128b47a6d317bb0"
+            "b7b38a0c43ec066a034e38f86f5f0926867b9eb2144fd8a7aac88c7c38bf5566"
         );
     }
 

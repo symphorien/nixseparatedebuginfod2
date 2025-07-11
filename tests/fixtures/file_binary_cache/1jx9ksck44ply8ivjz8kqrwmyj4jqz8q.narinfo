@@ -1,0 +1,10 @@
+StorePath: /nix/store/1jx9ksck44ply8ivjz8kqrwmyj4jqz8q-python3.13-lxml-5.4.0
+URL: nar/0mvm26ikafmabnmygpd75al8p2ncjnf3dggvgd7m7i7s4jglmr06.nar.xz
+Compression: xz
+FileHash: sha256:0mvm26ikafmabnmygpd75al8p2ncjnf3dggvgd7m7i7s4jglmr06
+FileSize: 1426664
+NarHash: sha256:0qq9kncs9q14pwy5d5vl1lcfz9vxmdx8d49pncdsqp215cr16cwg
+NarSize: 6145280
+References: 1jx9ksck44ply8ivjz8kqrwmyj4jqz8q-python3.13-lxml-5.4.0 abch1r0gnbpikbp9n4x6mm8dwqwfrib6-zlib-1.3.1 asv3l0ddkpw57ldrlnkvc4ylwgmib2is-libxslt-1.1.43 djck7mx6jad1w0yy6zings96dyxanls6-python3-3.13.5 g2jzxk3s7cnkhh8yq55l4fbvf639zy37-glibc-2.40-66 ii6cjlj3fjbz4zvygf0f3c4yvi37h56x-libxml2-2.14.4-unstable-2025-06-20
+Deriver: 4a0kmpxigxvbkqlwjdhbsi1dvk5gkh77-python3.13-lxml-5.4.0.drv
+Sig: cache.nixos.org-1:hKJjj61bm/oyyKza4doAObuZoiMSmXbBumGwBQ8u4p3S3LhxS/9wvtI4DBvJBllJH9zKbFvGWr1PQzYlizoRCQ==

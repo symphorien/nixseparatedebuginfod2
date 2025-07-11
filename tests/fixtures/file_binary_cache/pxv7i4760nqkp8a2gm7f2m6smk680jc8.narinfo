@@ -1,0 +1,10 @@
+StorePath: /nix/store/pxv7i4760nqkp8a2gm7f2m6smk680jc8-util-linux-minimal-2.41-bin
+URL: nar/1xn65h4h2xv6zv0k1nzzgbklbaxgjcisxr1ikim4r3ha71km80xr.nar.xz
+Compression: xz
+FileHash: sha256:1xn65h4h2xv6zv0k1nzzgbklbaxgjcisxr1ikim4r3ha71km80xr
+FileSize: 1144808
+NarHash: sha256:1jl2g2z4h45p5nm2g0vlm20cy8vbx0fjl83fcpppk5q2l90rq43y
+NarSize: 8151664
+References: 5x3inxk2l78ygb75kbhim3g2w67fra2r-sqlite-3.50.1 abch1r0gnbpikbp9n4x6mm8dwqwfrib6-zlib-1.3.1 fi10kgdpl0nzj7viccd633a711apfni7-util-linux-minimal-2.41-lib g2jzxk3s7cnkhh8yq55l4fbvf639zy37-glibc-2.40-66 pgsyb47n1zg83jbrczd6fm7vgqfk07p2-util-linux-minimal-2.41-swap pxv7i4760nqkp8a2gm7f2m6smk680jc8-util-linux-minimal-2.41-bin rn69vf7da9a70y5810ss1dkdly8ax0yl-libcap-ng-0.8.5 xa78q3wwiqxm7csh5dcxqn9izbd7552m-util-linux-minimal-2.41-mount yr03jb293wrj2ak122rblsm5j2x10w99-util-linux-minimal-2.41-login
+Deriver: 00qq8j2cydy9lyyhg91rswmr32ys1wb4-util-linux-minimal-2.41.drv
+Sig: cache.nixos.org-1:UsPWzEFr/NpsV3BueS2e3gFpVb56OB7cBXuAfYzEyuE2fP2SYxqhInrmugvNuTVEDQm4zEkM06oJ5ojHBWclCA==

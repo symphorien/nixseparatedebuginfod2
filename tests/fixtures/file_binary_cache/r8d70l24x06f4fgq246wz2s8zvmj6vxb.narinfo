@@ -1,0 +1,10 @@
+StorePath: /nix/store/r8d70l24x06f4fgq246wz2s8zvmj6vxb-gnutar-1.35
+URL: nar/11s0d7c3zlpv6mzjcg7cfwk7yv3sfmkwhinyajn31yzndgw4lyzf.nar.xz
+Compression: xz
+FileHash: sha256:11s0d7c3zlpv6mzjcg7cfwk7yv3sfmkwhinyajn31yzndgw4lyzf
+FileSize: 548640
+NarHash: sha256:19zvir5ixjz9v1hznnvfv89328a8lx77fjfl6nxpdsfslwqfwkr3
+NarSize: 2823776
+References: g2jzxk3s7cnkhh8yq55l4fbvf639zy37-glibc-2.40-66 r8d70l24x06f4fgq246wz2s8zvmj6vxb-gnutar-1.35 zd7rkbwr7z6ysngifmhzl11vmamavkr9-acl-2.3.2
+Deriver: 12nh3yqk1shap94xhpnwagbysph1dwzl-gnutar-1.35.drv
+Sig: cache.nixos.org-1:buJz2ndwc9z/QUPJD7VI3fk4vA89Kq4t2l0EFDkwQWuf+ZdakyWss1lpuVqXYn9fT8NgkR2O3Ez7zvVfJPocBg==

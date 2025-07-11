@@ -1,0 +1,10 @@
+StorePath: /nix/store/yr03jb293wrj2ak122rblsm5j2x10w99-util-linux-minimal-2.41-login
+URL: nar/1zaf42caj48dyzi0wmdzbffi42yp97zkzr4n44r466fp060ra3lr.nar.xz
+Compression: xz
+FileHash: sha256:1zaf42caj48dyzi0wmdzbffi42yp97zkzr4n44r466fp060ra3lr
+FileSize: 27092
+NarHash: sha256:19a5j8b5cx5i8m2c5rka5ns1pymg2k7gppkibq5fln3w92smvai4
+NarSize: 97136
+References: g2jzxk3s7cnkhh8yq55l4fbvf639zy37-glibc-2.40-66 n09001wfd3d5j2wzvmr4vfpf1pqyvn43-libxcrypt-4.4.38
+Deriver: 00qq8j2cydy9lyyhg91rswmr32ys1wb4-util-linux-minimal-2.41.drv
+Sig: cache.nixos.org-1:9Gt1Cyo2J1+amoLgKpvV4Cy+Yi95IEj1yXrWKF+jOoJvM0AIf2vVOBnYjyE3u/WMXnp/X14fAId41qVLuxwhCg==

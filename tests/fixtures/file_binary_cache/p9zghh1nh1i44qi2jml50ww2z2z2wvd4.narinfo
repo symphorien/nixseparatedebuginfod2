@@ -1,0 +1,10 @@
+StorePath: /nix/store/p9zghh1nh1i44qi2jml50ww2z2z2wvd4-mailcap-2.1.54
+URL: nar/1q652ahj7r20mlr4srdxjcnvx9z1678yx137dh3iiajr22m2lvsz.nar.xz
+Compression: xz
+FileHash: sha256:1q652ahj7r20mlr4srdxjcnvx9z1678yx137dh3iiajr22m2lvsz
+FileSize: 26156
+NarHash: sha256:1xbjd7qddfb3r809w1dyp7bhbpa8xvll9n295q1x38fa05v68spz
+NarSize: 119360
+References: 
+Deriver: 62071ydg0xqj0r08di55hm56y13p3b44-mailcap-2.1.54.drv
+Sig: cache.nixos.org-1:Xz6zh//x8/VhN9L3v5pmoovdLuFNH8VWvfnHqW+Ue2p05enroMzexNFkW4+e3Y5fZsjeAMIfQ9ilquiFm8+sDg==

@@ -1,0 +1,10 @@
+StorePath: /nix/store/x18cljzn90cdmja42xy4aqry1s3qi2c1-libcap-2.76-lib
+URL: nar/1i7aywkzfvhgf5hz4hm3f4n9p53n3xsfch36qnv73kmg632wdwhq.nar.xz
+Compression: xz
+FileHash: sha256:1i7aywkzfvhgf5hz4hm3f4n9p53n3xsfch36qnv73kmg632wdwhq
+FileSize: 22108
+NarHash: sha256:0a9abxmljyh0549sih78xbrpj56nl0yx2wsf8qs5bbvyvrwkvfxd
+NarSize: 75184
+References: g2jzxk3s7cnkhh8yq55l4fbvf639zy37-glibc-2.40-66
+Deriver: f28qbv030icbphrr7a1fpv89adq9xhpm-libcap-2.76.drv
+Sig: cache.nixos.org-1:1Kl0JNkm+63704Pmiw3BZPjKmKJuYe4aFZUI/9G4HY5ViYx7I+JAsm0nk/dJkw/Q5tIj5stbXkWUlCabSLk9Bg==

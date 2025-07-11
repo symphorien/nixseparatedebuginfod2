@@ -1,0 +1,10 @@
+StorePath: /nix/store/g7z3wq70z4wd5n6r0hqplkm38wjj4j0p-kmod-31-lib
+URL: nar/0kdji4jjhakrdxxcdfc3aaplpy95xarg08qwh53fakk2mwhv3jnm.nar.xz
+Compression: xz
+FileHash: sha256:0kdji4jjhakrdxxcdfc3aaplpy95xarg08qwh53fakk2mwhv3jnm
+FileSize: 45244
+NarHash: sha256:0156qzc9zhxdknvvzs9mdnl1gdf62i18xmkw9sa4lain5s2czqgd
+NarSize: 127536
+References: 9kd5dyrajlqa97ifwyi38c17lrvabbvw-zstd-1.5.7 g2jzxk3s7cnkhh8yq55l4fbvf639zy37-glibc-2.40-66 g7z3wq70z4wd5n6r0hqplkm38wjj4j0p-kmod-31-lib nvays4sx5xx2m44kslcvrv90vpbi81xn-xz-5.8.1
+Deriver: 91vpy8alriqa5hmh169cr18a4ic90lmw-kmod-31.drv
+Sig: cache.nixos.org-1:DUkwN6RP3mKk1UhZUv5qxJvh3wcLT2HDxIcveILNEKdG5oiCRs9jyhpnPhI8w051MgCxkdF/vsoV2KitcIpuDQ==

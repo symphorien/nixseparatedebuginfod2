@@ -1,9 +1,0 @@
-StorePath: /nix/store/4zkqxj4frr3gbwrnba9crk5xp0xy4z4i-ninja-1.12.1-debug
-URL: nar/02ln588v3x2xvll3lfazh32vxmvkx75936nc3k9lfg8c08dlm0gp.nar.xz
-Compression: xz
-FileHash: sha256:02ln588v3x2xvll3lfazh32vxmvkx75936nc3k9lfg8c08dlm0gp
-FileSize: 2706140
-NarHash: sha256:1d7y260p964rcn76hi1kwljr539f3bnfa0cl444lfsp7l21xbn1w
-NarSize: 2768936
-References: anp6npvr7pmh8hdaqk6c9xm57pzrnqw3-ninja-1.12.1 n11lk1q63864l8vfdl8h8aja1shs3yr7-source
-Deriver: yh27lq2was1vm5a2i2hyy031klp8n2ic-ninja-1.12.1.drv

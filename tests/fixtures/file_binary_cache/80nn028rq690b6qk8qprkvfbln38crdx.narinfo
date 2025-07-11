@@ -1,0 +1,10 @@
+StorePath: /nix/store/80nn028rq690b6qk8qprkvfbln38crdx-systemd-minimal-257.6-debug
+URL: nar/01fqbcmlbxwm1jdk07hc9wfj4rzqzp27rx414k5zvilcq40jwr6m.nar.xz
+Compression: xz
+FileHash: sha256:01fqbcmlbxwm1jdk07hc9wfj4rzqzp27rx414k5zvilcq40jwr6m
+FileSize: 17690208
+NarHash: sha256:0kbp04aldkkcxqpcbxa3kn49z4cn5xlrr6cdrgfh0pwx538hf3kl
+NarSize: 25803656
+References: 0qrgvvnnvw55xnk7bn8pbz2rqy6m8x15-coreutils-9.7 2qw62845796lyx649ck67zbk04pv8xhf-source 345523198bcsdzay55pfiimkiajq6lq8-bash-interactive-5.2p37 8wz7bzgv6zjdxsqb3frbx4nsqs0x657y-kmod-31 iwxwfb7yg9ry5pygi986z97i4b3b6rgn-getent-glibc-2.40-66 pbqih0cmbc4xilscj36m80ardhg6kawp-systemd-minimal-257.6 pgsyb47n1zg83jbrczd6fm7vgqfk07p2-util-linux-minimal-2.41-swap pnk8zqm3caj2zig2fz1zkp8w7701ymps-python3-3.13.5-env pxv7i4760nqkp8a2gm7f2m6smk680jc8-util-linux-minimal-2.41-bin r8d70l24x06f4fgq246wz2s8zvmj6vxb-gnutar-1.35
+Deriver: 67ds7hgw39biy9yl0vyxfcdjb3sb62pr-systemd-minimal-257.6.drv
+Sig: cache.nixos.org-1:yuUkqS/d2/IuO2RLWgFfJev+EZgIhzvsAgFk7LMGGUb3CU7nhqphAzAoSxEiAqWqyBTgA+Fp6vOfXTYw5sUzDw==

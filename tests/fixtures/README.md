@@ -1,16 +1,10 @@
-`./file_binary_cache` is a binary cache created with `nix copy ... --to file://...?index-debug-info=true` from nixpkgs `c014a3b656d16b0c55700b91d7719c4edc54db0b`.
+`./file_binary_cache` is a binary cache created with `nix copy ... --to file://...?index-debug-info=true` from nixpkgs `e7ecba7a3ab9f9f3fc0866f6627fe19abdbaaa5d`.
 It contains:
 - `gnumake`, an example of C program with source as an archive.
-  * `/nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1`
-  * `/nix/store/w4pl4nw4lygw0sca2q0667fkz5b92lvk-gnumake-4.4.1-debug`
+  * `/nix/store/34j18r2rpi7js1whmvzm9wliad55rilr-gnumake-4.4.1`
+  * `/nix/store/dlkw5480vfxdi21rybli43ii782czp94-gnumake-4.4.1-debug`
   * `/nix/store/0avnvyc7pkcr4pjqws7hwpy87m6wlnjc-make-4.4.1.tar.gz`
-- `ninja`, an example of C++ program with source as a directory
-  * `/nix/store/anp6npvr7pmh8hdaqk6c9xm57pzrnqw3-ninja-1.12.1`
-  * `/nix/store/4zkqxj4frr3gbwrnba9crk5xp0xy4z4i-ninja-1.12.1-debug`
-  * `/nix/store/n11lk1q63864l8vfdl8h8aja1shs3yr7-source`
-After I added support for patched files in `25231127dcf5842fe0c58542efecc0f9c8952881`, I added:
-- another copy of gnumake
-  * `/nix/store/sj8bfxjk8scdkgmlpan0s8cqccf0ny9j-gnumake-4.4.1-debug/`
-  * `/nix/store/sbrb2ymlvq2bg7v8nf7p7qkqg5q2ks32-gnumake-4.4.1`
-  * `/nix/store/0avnvyc7pkcr4pjqws7hwpy87m6wlnjc-make-4.4.1.tar.gz`
-
+- `systemdMinimal`, an example of C program with source as a directory
+  * `/nix/store/pbqih0cmbc4xilscj36m80ardhg6kawp-systemd-minimal-257.6`
+  * `/nix/store/80nn028rq690b6qk8qprkvfbln38crdx-systemd-minimal-257.6-debug`
+  * `/nix/store/2qw62845796lyx649ck67zbk04pv8xhf-source`

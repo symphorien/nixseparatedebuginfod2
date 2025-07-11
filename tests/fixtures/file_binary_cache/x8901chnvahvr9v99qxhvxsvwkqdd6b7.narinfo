@@ -1,9 +1,0 @@
-StorePath: /nix/store/x8901chnvahvr9v99qxhvxsvwkqdd6b7-libidn2-2.3.7
-URL: nar/13k4jil8v99mndnj4wbpwwy8s8ymdchd5kmbp5xyk26aa6w55m53.nar.xz
-Compression: xz
-FileHash: sha256:13k4jil8v99mndnj4wbpwwy8s8ymdchd5kmbp5xyk26aa6w55m53
-FileSize: 89784
-NarHash: sha256:1jyhxywqc4az0clkmpdvc3537b0bnrswzyjfrq2iyhpfln4aggdd
-NarSize: 361104
-References: 410znzb080x08c0pykqfc3gmqv84fwxn-libunistring-1.3 x8901chnvahvr9v99qxhvxsvwkqdd6b7-libidn2-2.3.7
-Deriver: 4qwfidyiksn70rc4l89scd6ksf116d2m-libidn2-2.3.7.drv

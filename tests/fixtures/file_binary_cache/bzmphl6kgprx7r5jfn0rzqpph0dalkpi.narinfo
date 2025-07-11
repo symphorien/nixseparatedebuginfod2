@@ -1,0 +1,10 @@
+StorePath: /nix/store/bzmphl6kgprx7r5jfn0rzqpph0dalkpi-libseccomp-2.6.0-lib
+URL: nar/1hhxfl2s7z7llnxfdqzry22x451rh3ccpngg1qb38x0rrf5h8win.nar.xz
+Compression: xz
+FileHash: sha256:1hhxfl2s7z7llnxfdqzry22x451rh3ccpngg1qb38x0rrf5h8win
+FileSize: 46704
+NarHash: sha256:0z4y05lqykpnmmvk67sz164g9004n3jmxpfsk1g32xfinq3xpdc0
+NarSize: 198392
+References: bzmphl6kgprx7r5jfn0rzqpph0dalkpi-libseccomp-2.6.0-lib g2jzxk3s7cnkhh8yq55l4fbvf639zy37-glibc-2.40-66
+Deriver: d8fyy1zpm8kvrad6av06w92j8c7i5717-libseccomp-2.6.0.drv
+Sig: cache.nixos.org-1:etacyda7CEALvk7CmD0hQe7SUAQtMVva9REulmbvkE92p1yksKbnx25Yry5CNMaKwktTQICZbu8Z9/NJnJlzDg==

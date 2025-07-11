@@ -1,0 +1,10 @@
+StorePath: /nix/store/pnk8zqm3caj2zig2fz1zkp8w7701ymps-python3-3.13.5-env
+URL: nar/0wvl521al33cr9f801mb2jbnf8fq7c0wjmw8kjg1hmydr82w9xlb.nar.xz
+Compression: xz
+FileHash: sha256:0wvl521al33cr9f801mb2jbnf8fq7c0wjmw8kjg1hmydr82w9xlb
+FileSize: 5688
+NarHash: sha256:15ldqncfjvvfag0gfr1qrb2bdcd5mc6dxaah2060vmq6ylv4rqah
+NarSize: 252032
+References: 1jx9ksck44ply8ivjz8kqrwmyj4jqz8q-python3.13-lxml-5.4.0 6vzcxjxa2wlh3p9f5nhbk62bl3q313ri-gcc-14.3.0-lib 8zv8vsanhc29vn83i7b06hg5p8ssh2m2-python3.13-markupsafe-3.0.2 djck7mx6jad1w0yy6zings96dyxanls6-python3-3.13.5 g2jzxk3s7cnkhh8yq55l4fbvf639zy37-glibc-2.40-66 j9sxb7lqbwjr3j7gdycwbdaybsj580cf-python3.13-jinja2-3.1.6 pnk8zqm3caj2zig2fz1zkp8w7701ymps-python3-3.13.5-env
+Deriver: 2ck5kwp38v620vv9v9qj2ykaz1lz68nz-python3-3.13.5-env.drv
+Sig: cache.nixos.org-1:0mV4gRfY/+kF58V+S2wE8d/w1V2gHbmbJXblHJixTQl7OMZsx6rmaTmBN0tkBfKdsIVmZ+luyYyDb5nZMK5vCg==

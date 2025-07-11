@@ -1,0 +1,10 @@
+StorePath: /nix/store/6w567ghwq2jnmqcq93fnrh92z14hmx6n-kexec-tools-2.0.31
+URL: nar/0vvf8g0khzw9lf52wzakzhcsc0jsjg4k8gx0zhkzc79106gcg2x4.nar.xz
+Compression: xz
+FileHash: sha256:0vvf8g0khzw9lf52wzakzhcsc0jsjg4k8gx0zhkzc79106gcg2x4
+FileSize: 80932
+NarHash: sha256:1fqkiiavabba7kwx6w975gk44w6kvgk4nmyll9bh8i592zy01i4i
+NarSize: 256888
+References: 9kd5dyrajlqa97ifwyi38c17lrvabbvw-zstd-1.5.7 abch1r0gnbpikbp9n4x6mm8dwqwfrib6-zlib-1.3.1 g2jzxk3s7cnkhh8yq55l4fbvf639zy37-glibc-2.40-66
+Deriver: b7j6cp4b6p1fld5kriw5b6zyrx88hz57-kexec-tools-2.0.31.drv
+Sig: cache.nixos.org-1:YWLdD4rfu+XFm+tirXZFBp5faM5BVrsraWkTyWHmRhmC8T3vNSBRZcA41wIVwa/1ECDPtYvGOSdPct7R+zErBw==

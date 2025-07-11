@@ -1,0 +1,10 @@
+StorePath: /nix/store/sbjkm6a7p6f97xqgy4i83rdi1q71nxcz-ncurses-6.5
+URL: nar/18zg71jda3ckb09bgw47kr9waz0bkp680ya2ppmhr1kd25g73k2g.nar.xz
+Compression: xz
+FileHash: sha256:18zg71jda3ckb09bgw47kr9waz0bkp680ya2ppmhr1kd25g73k2g
+FileSize: 505636
+NarHash: sha256:1rnlxv1l7bkrvn89x4f8dn2s4dl007p64zfbjpmmglw7asmmi845
+NarSize: 3798824
+References: g2jzxk3s7cnkhh8yq55l4fbvf639zy37-glibc-2.40-66 sbjkm6a7p6f97xqgy4i83rdi1q71nxcz-ncurses-6.5
+Deriver: skrii5w5karfb8vy997fbg7dc1cdx2f6-ncurses-6.5.drv
+Sig: cache.nixos.org-1:hTRaoSWu9HKAAhqE7yJ5YE1uKUnG3+Ffpc0naVvINKyZMqedtRmJBwPx/8BZUc48KX+4VXMeCfI5kvjQOFJ2Ag==

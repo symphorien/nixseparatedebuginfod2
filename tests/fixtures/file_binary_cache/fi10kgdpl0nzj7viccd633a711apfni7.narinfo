@@ -1,0 +1,10 @@
+StorePath: /nix/store/fi10kgdpl0nzj7viccd633a711apfni7-util-linux-minimal-2.41-lib
+URL: nar/0nix5bxgn5z8mdwc6dmihx8vy8zg1baxhm1w8dkf8pwzn1kj8sfa.nar.xz
+Compression: xz
+FileHash: sha256:0nix5bxgn5z8mdwc6dmihx8vy8zg1baxhm1w8dkf8pwzn1kj8sfa
+FileSize: 520788
+NarHash: sha256:1yv4zrqc90canazlmhvg1wrwac7711ammfmni5vqsdngzkjxd2ac
+NarSize: 2040720
+References: 5x3inxk2l78ygb75kbhim3g2w67fra2r-sqlite-3.50.1 fi10kgdpl0nzj7viccd633a711apfni7-util-linux-minimal-2.41-lib g2jzxk3s7cnkhh8yq55l4fbvf639zy37-glibc-2.40-66
+Deriver: 00qq8j2cydy9lyyhg91rswmr32ys1wb4-util-linux-minimal-2.41.drv
+Sig: cache.nixos.org-1:YZVw3IZBIfSfa2adbiGHn9PhBGUvczQoWcYlDBRrsy35q24n/F2LmfzkOh7h2kl7dyC3hesFx3s+MuJiHi3uBA==

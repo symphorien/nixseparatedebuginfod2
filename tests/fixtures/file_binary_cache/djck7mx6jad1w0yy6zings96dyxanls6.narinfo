@@ -1,0 +1,10 @@
+StorePath: /nix/store/djck7mx6jad1w0yy6zings96dyxanls6-python3-3.13.5
+URL: nar/15mnh7hj8aabnnl1rgby5dl62nsdbjsbbbhyr4yv9pg82mcrzhyx.nar.xz
+Compression: xz
+FileHash: sha256:15mnh7hj8aabnnl1rgby5dl62nsdbjsbbbhyr4yv9pg82mcrzhyx
+FileSize: 43118720
+NarHash: sha256:0hp83p4g70ggn5im15hwc3qs1z7ylikd9sqirb4rwqwgzlxmijgk
+NarSize: 111497640
+References: 0xq895kzz9gpfh36iyzdlywp073s6ksk-readline-8.2p13 4ciq67pdwyc43a5y1h63wcipl54f938w-expat-2.7.1 5x3inxk2l78ygb75kbhim3g2w67fra2r-sqlite-3.50.1 5zz0lpl9pfb72vcal9hzr8d6lnv0n2ny-bzip2-1.0.8 6vzcxjxa2wlh3p9f5nhbk62bl3q313ri-gcc-14.3.0-lib abch1r0gnbpikbp9n4x6mm8dwqwfrib6-zlib-1.3.1 aqx9win7asgf5n9sg51prhf6d7l0dw27-gdbm-1.25-lib djck7mx6jad1w0yy6zings96dyxanls6-python3-3.13.5 fi10kgdpl0nzj7viccd633a711apfni7-util-linux-minimal-2.41-lib g2jzxk3s7cnkhh8yq55l4fbvf639zy37-glibc-2.40-66 k8zna49bykvnr4qxdqzyqbhdx7bngqrz-mpdecimal-4.0.1 n09001wfd3d5j2wzvmr4vfpf1pqyvn43-libxcrypt-4.4.38 nvays4sx5xx2m44kslcvrv90vpbi81xn-xz-5.8.1 p79bgyzmmmddi554ckwzbqlavbkw07zh-bash-5.2p37 p9zghh1nh1i44qi2jml50ww2z2z2wvd4-mailcap-2.1.54 qsylwd42s395f5q45mh7v9jhs0qz16zh-tzdata-2025b sbjkm6a7p6f97xqgy4i83rdi1q71nxcz-ncurses-6.5 v4vqyvb5gq799b1v3qf5lyyij7pnjfiz-libffi-3.4.8 wadq4gzybbvg5243d90l9x4mw3459r3a-openssl-3.5.1
+Deriver: v1fqi3zvjbs36z3hvy9bfk9bpvb9bsck-python3-3.13.5.drv
+Sig: cache.nixos.org-1:dMqPBcMH2oY0BpzDGbEO+EqnUQEINw6KKjoyMbKnLItiHAw9+XQRDQEuzM+BBAXmmBvmcQp8/BfZI1pzlXJwAw==

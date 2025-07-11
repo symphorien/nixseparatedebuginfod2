@@ -1,0 +1,10 @@
+StorePath: /nix/store/9kd5dyrajlqa97ifwyi38c17lrvabbvw-zstd-1.5.7
+URL: nar/05bf9i2h6hakdya981v8mj8gzgmnfk3cjf25hbylcad5nhdzl957.nar.xz
+Compression: xz
+FileHash: sha256:05bf9i2h6hakdya981v8mj8gzgmnfk3cjf25hbylcad5nhdzl957
+FileSize: 374704
+NarHash: sha256:0vvrfyzry5lmjz73qbzc83200ihymqdzkyyba12sw9lqd8qnvj7p
+NarSize: 1210304
+References: 6vzcxjxa2wlh3p9f5nhbk62bl3q313ri-gcc-14.3.0-lib 9kd5dyrajlqa97ifwyi38c17lrvabbvw-zstd-1.5.7 g2jzxk3s7cnkhh8yq55l4fbvf639zy37-glibc-2.40-66
+Deriver: p3ncbhsz3in7fj9xykm692nnvqkp0ffk-zstd-1.5.7.drv
+Sig: cache.nixos.org-1:DybRZ10TTGFY90bPQBPW82ugXI83ho4MQUqzOso40idi9C5uGa1iguZ+q9PKBFhJIqxFwcQKDtMDnJ+fJ6zPDA==

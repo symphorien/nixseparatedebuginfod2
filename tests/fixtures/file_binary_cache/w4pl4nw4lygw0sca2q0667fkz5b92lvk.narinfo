@@ -1,9 +1,0 @@
-StorePath: /nix/store/w4pl4nw4lygw0sca2q0667fkz5b92lvk-gnumake-4.4.1-debug
-URL: nar/050kicsmzdsk1gbcsibf0m34495vd2pzi34ywi6ha78ry56axisq.nar.xz
-Compression: xz
-FileHash: sha256:050kicsmzdsk1gbcsibf0m34495vd2pzi34ywi6ha78ry56axisq
-FileSize: 314728
-NarHash: sha256:04dpjnj6bgncnq850sqxsxsaqzj5kqvl1m776q7i35zwcjmzmxyf
-NarSize: 343320
-References: 0avnvyc7pkcr4pjqws7hwpy87m6wlnjc-make-4.4.1.tar.gz 6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1
-Deriver: hrm03f23kgr8mgn3k6h802xvypbzdzgs-gnumake-4.4.1.drv

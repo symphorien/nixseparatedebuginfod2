@@ -1,0 +1,10 @@
+StorePath: /nix/store/pbqih0cmbc4xilscj36m80ardhg6kawp-systemd-minimal-257.6
+URL: nar/0yghdk8zf2pz30gqh088prqibsq2mjl8p9sg6l8wd50jyd3r7p5j.nar.xz
+Compression: xz
+FileHash: sha256:0yghdk8zf2pz30gqh088prqibsq2mjl8p9sg6l8wd50jyd3r7p5j
+FileSize: 3650764
+NarHash: sha256:01cfmqdppk798k7phy14chhwgb7wyy7vzwz964ddp6maslyp5n0m
+NarSize: 17052080
+References: 0qrgvvnnvw55xnk7bn8pbz2rqy6m8x15-coreutils-9.7 345523198bcsdzay55pfiimkiajq6lq8-bash-interactive-5.2p37 6w567ghwq2jnmqcq93fnrh92z14hmx6n-kexec-tools-2.0.31 8wz7bzgv6zjdxsqb3frbx4nsqs0x657y-kmod-31 bzmphl6kgprx7r5jfn0rzqpph0dalkpi-libseccomp-2.6.0-lib fi10kgdpl0nzj7viccd633a711apfni7-util-linux-minimal-2.41-lib g2jzxk3s7cnkhh8yq55l4fbvf639zy37-glibc-2.40-66 g7z3wq70z4wd5n6r0hqplkm38wjj4j0p-kmod-31-lib iwxwfb7yg9ry5pygi986z97i4b3b6rgn-getent-glibc-2.40-66 n09001wfd3d5j2wzvmr4vfpf1pqyvn43-libxcrypt-4.4.38 pbqih0cmbc4xilscj36m80ardhg6kawp-systemd-minimal-257.6 pgsyb47n1zg83jbrczd6fm7vgqfk07p2-util-linux-minimal-2.41-swap w0f9ks6q445894yfzsbag7r5c8q7001j-kbd-2.7.1 x18cljzn90cdmja42xy4aqry1s3qi2c1-libcap-2.76-lib xa78q3wwiqxm7csh5dcxqn9izbd7552m-util-linux-minimal-2.41-mount yr03jb293wrj2ak122rblsm5j2x10w99-util-linux-minimal-2.41-login
+Deriver: 67ds7hgw39biy9yl0vyxfcdjb3sb62pr-systemd-minimal-257.6.drv
+Sig: cache.nixos.org-1:unID5tL+SkWQ2CXydQgIcoJRuhM5F16py16PWP4aI4/RfyRosTHtid8E5zmwNi7vC+jF4zEuQrsckAgAmYpUBQ==

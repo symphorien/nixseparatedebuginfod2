@@ -189,7 +189,7 @@ async fn test_build_id_to_debug_output() {
     assert_eq!(
         substituter
             .build_id_to_debug_output(
-                &BuildId::new("483bd7f7229bdb06462222e1e353e4f37e15c293").unwrap(),
+                &BuildId::new("b87e34547e94f167f4b737f3a25955477a485cc7").unwrap(),
                 &into
             )
             .await
@@ -198,10 +198,10 @@ async fn test_build_id_to_debug_output() {
     );
     assert_eq!(
         file_sha256(
-            &into.join("lib/debug/.build-id/48/3bd7f7229bdb06462222e1e353e4f37e15c293.debug")
+            &into.join("lib/debug/.build-id/b8/7e34547e94f167f4b737f3a25955477a485cc7.debug")
         )
         .await,
-        "e8bcbed1f80e8fcaeb622ad1c1c77a526047ace2f73b75ef1128b47a6d317bb0"
+        "b7b38a0c43ec066a034e38f86f5f0926867b9eb2144fd8a7aac88c7c38bf5566"
     );
 }
 
@@ -217,7 +217,7 @@ async fn test_fetch_store_path() {
         substituter
             .fetch_store_path(
                 &StorePath::new(Path::new(
-                    "/nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1"
+                    "/nix/store/34j18r2rpi7js1whmvzm9wliad55rilr-gnumake-4.4.1"
                 ))
                 .unwrap(),
                 &into
@@ -228,6 +228,6 @@ async fn test_fetch_store_path() {
     );
     assert_eq!(
         file_sha256(&into.join("bin/make")).await,
-        "a7942bdec982d11d0467e84743bee92138038e7a38f37ec08e5cc6fa5e3d18f3"
+        "bef9ec5e1fe7ccacbf00b1053c6de54de9857ec3d173504190462a01ed3cc52e"
     );
 }

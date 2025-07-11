@@ -1,0 +1,10 @@
+StorePath: /nix/store/8zv8vsanhc29vn83i7b06hg5p8ssh2m2-python3.13-markupsafe-3.0.2
+URL: nar/046c2sfwnmg0v1nnszmqq68y8k9hj56g4wb61ih2z2slk279bynk.nar.xz
+Compression: xz
+FileHash: sha256:046c2sfwnmg0v1nnszmqq68y8k9hj56g4wb61ih2z2slk279bynk
+FileSize: 16368
+NarHash: sha256:10hgx27347zca6v89lxvyic3xamx77987b1h5gx8s0m4k4byh939
+NarSize: 88456
+References: 8zv8vsanhc29vn83i7b06hg5p8ssh2m2-python3.13-markupsafe-3.0.2 djck7mx6jad1w0yy6zings96dyxanls6-python3-3.13.5 g2jzxk3s7cnkhh8yq55l4fbvf639zy37-glibc-2.40-66
+Deriver: i6kr3g9mph914xr5vn5m3ww3ib2m86i9-python3.13-markupsafe-3.0.2.drv
+Sig: cache.nixos.org-1:msi3eTTqSrFIDgnv6+ahyrrRJI4syrTPYHz2OrKQDJH5mvBLHY8pTcDnRIu2iUGPdFcJp03HLzvNrfiBt+OSDw==

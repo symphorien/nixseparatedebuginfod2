@@ -73,12 +73,12 @@ pub async fn narinfo_to_nar_location<T: AsyncBufRead>(narinfo: T) -> anyhow::Res
 #[tokio::test]
 async fn test_narinfo_to_nar_location() {
     let narinfo =
-        crate::test_utils::fixture("file_binary_cache/m3kjnkzvsj983fkzam6hc6vg3sjdcj19.narinfo");
+        crate::test_utils::fixture("file_binary_cache/8avg418ydn50ha9wlyrv2f5pj4qccldg.narinfo");
     let fd = tokio::fs::File::open(&narinfo).await.unwrap();
     let bufread = tokio::io::BufReader::new(fd);
     let url = narinfo_to_nar_location(bufread).await.unwrap();
     assert_eq!(
         url,
-        "nar/02zi1rwab3ff5m1k7c85abbdy717x1487fxd5j0b7kbmybk992x0.nar.xz"
+        "nar/078h1d26cqf628a2qy8660q6a5v5ga38mh036w5c0y49k9bxsaq9.nar.xz"
     );
 }

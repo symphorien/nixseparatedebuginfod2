@@ -241,16 +241,16 @@ mod test {
         )
         .await
         .unwrap();
-        // /nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/bin/make
+        // /nix/store/34j18r2rpi7js1whmvzm9wliad55rilr-gnumake-4.4.1/bin/make
         let debuginfo = debuginfod
-            .debuginfo(&BuildId::new("66b33fee92bf535e40d29622ce45b4bd01bebc1f").unwrap())
+            .debuginfo(&BuildId::new("0e20481820d3b92468102b35a5e4a29a8695c1af").unwrap())
             .await
             .unwrap()
             .unwrap();
-        // /nix/store/w4pl4nw4lygw0sca2q0667fkz5b92lvk-gnumake-4.4.1-debug/lib/debug/make
+        // /nix/store/dlkw5480vfxdi21rybli43ii782czp94-gnumake-4.4.1-debug/lib/debug/make
         assert_eq!(
             file_sha256(debuginfo).await,
-            "c7d7299291732384a47af188410469be6e6cdac3ad8652b93947462489d7f2f9"
+            "8f62cc563915e10f870bd7991ad88e535f842a8dd7afcba30c597b3bb6e728ad"
         );
     }
 
@@ -266,12 +266,12 @@ mod test {
         )
         .await
         .unwrap();
-        // /nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/bin/make
-        let buildid = BuildId::new("66b33fee92bf535e40d29622ce45b4bd01bebc1f").unwrap();
+        // /nix/store/34j18r2rpi7js1whmvzm9wliad55rilr-gnumake-4.4.1/bin/make
+        let buildid = BuildId::new("0e20481820d3b92468102b35a5e4a29a8695c1af").unwrap();
         let executable = debuginfod.executable(&buildid).await.unwrap().unwrap();
         assert_eq!(
             file_sha256(dbg!(executable)).await,
-            "a7942bdec982d11d0467e84743bee92138038e7a38f37ec08e5cc6fa5e3d18f3"
+            "bef9ec5e1fe7ccacbf00b1053c6de54de9857ec3d173504190462a01ed3cc52e"
         );
     }
 
@@ -287,9 +287,9 @@ mod test {
         )
         .await
         .unwrap();
-        // /nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/bin/make
-        let buildid = BuildId::new("66b33fee92bf535e40d29622ce45b4bd01bebc1f").unwrap();
-        let path = "nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/include/gnumake.h";
+        // /nix/store/34j18r2rpi7js1whmvzm9wliad55rilr-gnumake-4.4.1/bin/make
+        let buildid = BuildId::new("0e20481820d3b92468102b35a5e4a29a8695c1af").unwrap();
+        let path = "nix/store/34j18r2rpi7js1whmvzm9wliad55rilr-gnumake-4.4.1/include/gnumake.h";
         let source = debuginfod.source(&buildid, path).await.unwrap().unwrap();
         assert_eq!(
             file_sha256(dbg!(source)).await,
@@ -309,9 +309,9 @@ mod test {
         )
         .await
         .unwrap();
-        // /nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/bin/make
-        let buildid = BuildId::new("66b33fee92bf535e40d29622ce45b4bd01bebc1f").unwrap();
-        let path = "nix/store/6I1HJK6PA24A29SCQHIH4KZ1VFPGDRCD-gnumake-4.4.1/include/gnumake.h";
+        // /nix/store/34j18r2rpi7js1whmvzm9wliad55rilr-gnumake-4.4.1/bin/make
+        let buildid = BuildId::new("0e20481820d3b92468102b35a5e4a29a8695c1af").unwrap();
+        let path = "nix/store/34J18R2RPI7JS1WHMVZM9WLIAD55RILR-gnumake-4.4.1/include/gnumake.h";
         let source = debuginfod.source(&buildid, path).await.unwrap().unwrap();
         assert_eq!(
             file_sha256(dbg!(source)).await,
@@ -331,8 +331,8 @@ mod test {
         )
         .await
         .unwrap();
-        // /nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/bin/make
-        let buildid = BuildId::new("66b33fee92bf535e40d29622ce45b4bd01bebc1f").unwrap();
+        // /nix/store/34j18r2rpi7js1whmvzm9wliad55rilr-gnumake-4.4.1/bin/make
+        let buildid = BuildId::new("0e20481820d3b92468102b35a5e4a29a8695c1af").unwrap();
         let path = "nix/store/6I1H00000000000000004KZ1VFPGDRCD-gnumake-4.4.1/include/gnumake.h";
         let source = debuginfod.source(&buildid, path).await.unwrap();
         assert!(dbg!(source).is_none());
@@ -350,9 +350,9 @@ mod test {
         )
         .await
         .unwrap();
-        // /nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/bin/make
-        let buildid = BuildId::new("66b33fee92bf535e40d29622ce45b4bd01bebc1f").unwrap();
-        let path = "nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/include/gnumake_does_not_exist.h";
+        // /nix/store/34j18r2rpi7js1whmvzm9wliad55rilr-gnumake-4.4.1/bin/make
+        let buildid = BuildId::new("0e20481820d3b92468102b35a5e4a29a8695c1af").unwrap();
+        let path = "nix/store/34j18r2rpi7js1whmvzm9wliad55rilr-gnumake-4.4.1/include/gnumake_does_not_exist.h";
         let source = debuginfod.source(&buildid, path).await.unwrap();
         assert!(dbg!(source).is_none());
     }
@@ -369,14 +369,37 @@ mod test {
         )
         .await
         .unwrap();
-        // /nix/store/anp6npvr7pmh8hdaqk6c9xm57pzrnqw3-ninja-1.12.1/bin/ninja
-        let buildid = BuildId::new("483bd7f7229bdb06462222e1e353e4f37e15c293").unwrap();
-        let path = "build/source/src/ninja.cc";
+        // /nix/store/pbqih0cmbc4xilscj36m80ardhg6kawp-systemd-minimal-257.6/bin/systemctl
+        let buildid = BuildId::new("b87e34547e94f167f4b737f3a25955477a485cc7").unwrap();
+        let path = "../src/systemctl/systemctl.c";
         let source = debuginfod.source(&buildid, path).await.unwrap().unwrap();
-        // /nix/store/n11lk1q63864l8vfdl8h8aja1shs3yr7-source/src/ninja.cc
+        // /nix/store/2qw62845796lyx649ck67zbk04pv8xhf-source/src/systemctl/systemctl.c
         assert_eq!(
             file_sha256(dbg!(source)).await,
-            "5d013f718e1822493a98c5ca0c69fad4ec2279a0005a2cea8d665284563c3480"
+            "402ec408cd95844108e0c93e6bc249b97941a901fbc89ad8d3f45a07c5916708"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_source_in_source_dir_patched() {
+        setup_logging();
+        let t = tempdir().unwrap();
+        let substituter = FileSubstituter::test_fixture();
+        let debuginfod = Debuginfod::new(
+            t.path().into(),
+            Box::new(substituter),
+            Duration::from_secs(1000),
+        )
+        .await
+        .unwrap();
+        // /nix/store/pbqih0cmbc4xilscj36m80ardhg6kawp-systemd-minimal-257.6/bin/systemctl
+        let buildid = BuildId::new("b87e34547e94f167f4b737f3a25955477a485cc7").unwrap();
+        let path = "../src/core/manager.c";
+        let source = debuginfod.source(&buildid, path).await.unwrap().unwrap();
+        // /nix/store/80nn028rq690b6qk8qprkvfbln38crdx-systemd-minimal-257.6-debug/src/overlay/source/src/core/manager.c
+        assert_eq!(
+            file_sha256(dbg!(source)).await,
+            "62b2117906718dc4b66c128b6f3f81cb24f1c85c2df20de13be7b010087f17f6"
         );
     }
 
@@ -392,8 +415,8 @@ mod test {
         )
         .await
         .unwrap();
-        // /nix/store/6i1hjk6pa24a29scqhih4kz1vfpgdrcd-gnumake-4.4.1/bin/make
-        let buildid = BuildId::new("66b33fee92bf535e40d29622ce45b4bd01bebc1f").unwrap();
+        // /nix/store/34j18r2rpi7js1whmvzm9wliad55rilr-gnumake-4.4.1/bin/make
+        let buildid = BuildId::new("0e20481820d3b92468102b35a5e4a29a8695c1af").unwrap();
         let path = "/build/make-4.4.1/src/main.c";
         let source = debuginfod.source(&buildid, path).await.unwrap().unwrap();
         // /nix/store/0avnvyc7pkcr4pjqws7hwpy87m6wlnjc-make-4.4.1.tar.gz > make-4.4.1/src/main.c
@@ -415,11 +438,11 @@ mod test {
         )
         .await
         .unwrap();
-        // /nix/store/sbrb2ymlvq2bg7v8nf7p7qkqg5q2ks32-gnumake-4.4.1/bin/make
-        let buildid = BuildId::new("45a9ee3e03d0ab4797561a6668e85a5be6a86262").unwrap();
+        // /nix/store/34j18r2rpi7js1whmvzm9wliad55rilr-gnumake-4.4.1/bin/make
+        let buildid = BuildId::new("0e20481820d3b92468102b35a5e4a29a8695c1af").unwrap();
         let path = "/build/make-4.4.1/src/job.c";
         let source = debuginfod.source(&buildid, path).await.unwrap().unwrap();
-        // /nix/store/sj8bfxjk8scdkgmlpan0s8cqccf0ny9j-gnumake-4.4.1-debug/src/overlay/make-4.4.1/src/job.c
+        // /nix/store/dlkw5480vfxdi21rybli43ii782czp94-gnumake-4.4.1-debug/src/overlay/make-4.4.1/src/job.c
         assert_eq!(
             file_sha256(dbg!(source)).await,
             "65c819269ed09f81de1d1659efb76008f23bb748c805409f1ad5f782d15836df"
