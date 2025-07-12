@@ -3,7 +3,6 @@
 Contrary to nixseparatedebuginfod, this works by relying on the indexation hydra does only.
 
 It proxifies the debuginfo stored in a substituter, storing temporary data in a cache directory.
-Currently only supports file:// substituters.
 
 substituters must be created with the `index-debug-info` options:
 
@@ -30,9 +29,7 @@ and set the environment variable `DEBUGINFOD_URLS=http://127.0.0.1:1949`.
 
 ### Warning
 
-Does not protect itself correctly from path traversal attacks.
-
-Does not check signatures from the upstream cache.
+Does not check signatures from the upstream cache. Don't use `http` substituters, only `https`.
 
 ### License
 
