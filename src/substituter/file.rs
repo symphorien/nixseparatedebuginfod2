@@ -89,6 +89,7 @@ impl FileSubstituter {
     }
 
     #[cfg(test)]
+    /// Returns a file substituter for `tests/fixtures/file_binary_cache`
     pub fn test_fixture() -> Self {
         let path = crate::test_utils::fixture("file_binary_cache");
         assert!(path.exists());

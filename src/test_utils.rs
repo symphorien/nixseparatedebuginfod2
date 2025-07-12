@@ -80,6 +80,9 @@ pub fn fixture(path: &str) -> PathBuf {
     path
 }
 
+/// The url of a http binary cache serving `tests/fixtures/file_binary_cache`
+///
+/// Started on first access
 pub static HTTP_BINARY_CACHE: LazyLock<Url> = LazyLock::new(start_http_binary_cache);
 
 fn start_http_binary_cache() -> Url {

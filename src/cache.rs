@@ -98,6 +98,7 @@ pub struct CachedPathLock(#[allow(dead_code)] Arc<RwLockReadGuardArc<()>>);
 
 #[cfg(test)]
 impl CachedPathLock {
+    /// Returns a lock that contains no lock
     pub fn fake() -> Self {
         let lock = Arc::new(RwLock::new(()));
         CachedPathLock(Arc::new(RwLock::read_arc_blocking(&lock)))
