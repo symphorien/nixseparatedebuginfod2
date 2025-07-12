@@ -58,9 +58,17 @@ struct Server {
 
 impl Drop for Server {
     fn drop(&mut self) {
-        if let Err(e) = self.process.kill() {
-            eprintln!("failed to kill child {}", e)
+        nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(self.process.id() as i32),
+            nix::sys::signal::Signal::SIGINT,
+        )
+        .unwrap();
+        if self.process.try_wait().unwrap().is_some() {
+            return;
         }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        self.process.kill().unwrap();
+        self.process.wait().unwrap();
     }
 }
 
@@ -78,6 +86,7 @@ impl Server {
         command.env("RUST_LOG", "nixseparatedebuginfod2=trace,tower_http=debug");
         command
             .args([
+                "--die-with-parent",
                 "--bind",
                 "/",
                 "/",
@@ -96,7 +105,12 @@ impl Server {
             .arg(cache.path().join("server"))
             .arg("--expiration")
             .arg("1h");
-        let mut child = command.spawn().unwrap();
+        let child = command.spawn().unwrap();
+        let mut result = Server {
+            process: child,
+            port,
+            cache,
+        };
         // wait for the server to start
         let mut i = 0;
         loop {
@@ -107,7 +121,7 @@ impl Server {
             {
                 break;
             }
-            if let Some(status) = child.try_wait().unwrap() {
+            if let Some(status) = result.process.try_wait().unwrap() {
                 panic!("{command:?} failed to spawn: {status:?}")
             }
             if i > 100 {
@@ -116,11 +130,7 @@ impl Server {
             i += 1;
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
-        Server {
-            process: child,
-            port,
-            cache,
-        }
+        result
     }
 
     fn request(&self, args: &[&str]) -> PathBuf {
