@@ -133,11 +133,17 @@ impl Server {
         result
     }
 
-    fn request(&self, args: &[&str]) -> PathBuf {
+    fn run_debuginfod_find(&self, args: &[&str]) -> Command {
         let mut cmd = Command::new("debuginfod-find");
         cmd.env("HOME", self.cache.path().join("client"));
         cmd.env("DEBUGINFOD_URLS", format!("http://127.0.0.1:{}", self.port));
         cmd.args(args);
+        cmd
+    }
+
+    /// returns the path output by debuginfod-find
+    fn debuginfod_find_path(&self, args: &[&str]) -> PathBuf {
+        let mut cmd = self.run_debuginfod_find(args);
         let result = cmd.assert().success();
         let out = &result.get_output().stdout;
         let path = PathBuf::from(OsStr::from_bytes(out.trim_ascii_end()));
@@ -173,7 +179,8 @@ fn local_debuginfo_nominal() {
     let store = prepare_store();
     let server = Server::new(store.path());
     // /nix/store/34j18r2rpi7js1whmvzm9wliad55rilr-gnumake-4.4.1/bin/make
-    let debuginfo = server.request(&["debuginfo", "0e20481820d3b92468102b35a5e4a29a8695c1af"]);
+    let debuginfo =
+        server.debuginfod_find_path(&["debuginfo", "0e20481820d3b92468102b35a5e4a29a8695c1af"]);
     // /nix/store/dlkw5480vfxdi21rybli43ii782czp94-gnumake-4.4.1-debug/lib/debug/make
     assert_eq!(
         file_sha256(&debuginfo),
@@ -186,7 +193,7 @@ fn local_source_in_archive_patched() {
     let store = prepare_store();
     let server = Server::new(store.path());
     // /nix/store/34j18r2rpi7js1whmvzm9wliad55rilr-gnumake-4.4.1/bin/make
-    let source = server.request(&[
+    let source = server.debuginfod_find_path(&[
         "source",
         "0e20481820d3b92468102b35a5e4a29a8695c1af",
         "/build/make-4.4.1/src/job.c",
@@ -196,4 +203,17 @@ fn local_source_in_archive_patched() {
         file_sha256(dbg!(&source)),
         "65c819269ed09f81de1d1659efb76008f23bb748c805409f1ad5f782d15836df"
     );
+}
+
+#[test]
+fn local_path_traversal() {
+    let store = prepare_store();
+    let server = Server::new(store.path());
+    // /nix/store/34j18r2rpi7js1whmvzm9wliad55rilr-gnumake-4.4.1/bin/make
+    let mut cmd = server.run_debuginfod_find(&[
+        "source",
+        "0e20481820d3b92468102b35a5e4a29a8695c1af",
+        "/nix/store/2qw62845796lyx649ck67zbk04pv8xhf-source/../../../../etc/hostname",
+    ]);
+    cmd.assert().failure();
 }
