@@ -164,7 +164,7 @@ impl<R: AsyncBufRead> DecompressingReader<R> {
         } else {
             anyhow::bail!(
                 "don't support compression for extension of {}",
-                &String::from_utf8_lossy(&path_or_url)
+                &String::from_utf8_lossy(path_or_url)
             );
         };
         let name = path_or_url.to_owned();

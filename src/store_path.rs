@@ -167,7 +167,7 @@ impl StorePath {
     pub fn demangle(self) -> StorePath {
         let mut as_bytes = self.0.into_os_string().into_vec();
         let len = as_bytes.len();
-        let store_len = NIX_STORE.as_bytes().len();
+        let store_len = NIX_STORE.len();
         as_bytes[len.min(store_len + 1)..len.min(store_len + 1 + HASH_LEN)].make_ascii_lowercase();
         StorePath::new(OsStr::from_bytes(&as_bytes).as_ref()).unwrap()
     }

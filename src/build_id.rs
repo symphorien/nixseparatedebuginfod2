@@ -18,9 +18,7 @@ impl BuildId {
     ///
     /// Fails if the string is not composed of 40 hexadecimal characters.
     pub fn new(str: &str) -> anyhow::Result<Self> {
-        if let Some(bad_char) = str.chars().find(|&c| {
-            !(('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || ('0' <= c && c <= '9'))
-        }) {
+        if let Some(bad_char) = str.chars().find(|&c| !c.is_ascii_hexdigit()) {
             Err(anyhow::anyhow!(format!(
                 "bad character {:?} in build_id",
                 bad_char
