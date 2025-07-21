@@ -50,6 +50,25 @@ fn prepare_store() -> tempfile::TempDir {
     root
 }
 
+/// Prepares a command inside bwrap so that /nix/store also contains the derivations in
+/// `store.join("/nix/store")`.
+fn fake_store(store: &Path) -> Command {
+    let mut command = Command::new("bwrap");
+    command
+        .args([
+            "--die-with-parent",
+            "--bind",
+            "/",
+            "/",
+            "--overlay-src",
+            "/nix/store",
+            "--overlay-src",
+        ])
+        .arg(store.join("nix/store"))
+        .args(["--ro-overlay", "/nix/store", "--"]);
+    command
+}
+
 struct Server {
     process: Child,
     port: u16,
@@ -82,20 +101,28 @@ impl Server {
         let cache = tempfile::tempdir().unwrap();
         std::fs::create_dir(cache.path().join("server")).unwrap();
         std::fs::create_dir(cache.path().join("client")).unwrap();
-        let mut command = Command::new("bwrap");
+        let mut check_command = fake_store(&store);
+        check_command.arg("true");
+        // bwrap will fail if /nix/store is composed of several mountpoints.
+        // which is the case inside the nix sandbox.
+        // https://unix.stackexchange.com/questions/776030/mounting-overlayfs-in-a-user-namespace-with-child-mounts
+        if !check_command.status().unwrap().success() {
+            // write to /dev/store to bypass cargo capturing
+            std::fs::write(
+                "/dev/stderr",
+                r#"
+                @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+                failed to run command `true` in an overlayfs faking rw store.
+                giving up on running the test
+                @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+                "#,
+            )
+            .unwrap();
+            std::process::exit(0);
+        };
+        let mut command = fake_store(&store);
         command.env("RUST_LOG", "nixseparatedebuginfod2=trace,tower_http=debug");
         command
-            .args([
-                "--die-with-parent",
-                "--bind",
-                "/",
-                "/",
-                "--overlay-src",
-                "/nix/store",
-                "--overlay-src",
-            ])
-            .arg(store.join("nix/store"))
-            .args(["--ro-overlay", "/nix/store", "--"])
             .arg(cargo_bin!("nixseparatedebuginfod2"))
             .arg("--listen-address")
             .arg(&addr)
