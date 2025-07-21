@@ -31,6 +31,10 @@ and set the environment variable `DEBUGINFOD_URLS=http://127.0.0.1:1949`.
 
 Does not check signatures from the upstream cache. Don't use `http` substituters, only `https`.
 
+If you expose this server to the public, be aware that anybody can request
+files from very big archives, and the server will unpack them on demand,
+possibly leading to very large resource usage.
+
 ### License
 
 The source is GPL v3 only
