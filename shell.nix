@@ -20,6 +20,7 @@ mkShell {
     cargo-watch
     xz
     zstd
+    bubblewrap
   ]
   ++ lib.optionals (!gdb.meta.unsupported) [gdb];
   buildInputs = [ libarchive ];
