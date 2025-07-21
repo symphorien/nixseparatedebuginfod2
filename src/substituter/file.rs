@@ -111,8 +111,8 @@ impl FileSubstituter {
         };
         anyhow::ensure!(
             nar_path.starts_with(&self.path),
-            "redirected to nar path that escapes the Substituter: {}",
-            nar_path.display()
+            "redirected to nar path {nar_path:?} that escapes the Substituter {:?}",
+            &self.path,
         );
         let nar_reader = match tokio::fs::File::open(&nar_path).await {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
