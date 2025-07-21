@@ -21,6 +21,7 @@ mkShell {
     xz
     zstd
     bubblewrap
+    elfutils
   ]
   ++ lib.optionals (!gdb.meta.unsupported) [gdb];
   buildInputs = [ libarchive ];
