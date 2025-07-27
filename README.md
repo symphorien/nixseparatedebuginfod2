@@ -27,6 +27,12 @@ cargo run -- --substituter local: --expiration "1 day"
 
 and set the environment variable `DEBUGINFOD_URLS=http://127.0.0.1:1949`.
 
+### Source files
+
+nixseparatedebuginfod2 can provide source files for packages built from nixos-25.11 (nixos-unstable at the time I write this) only.
+Package built with older stdenv will only provide debuginfo. Source files which
+are patched during the build should be served patched correctly in most cases.
+
 ### Warning
 
 Does not check signatures from the upstream cache. Don't use `http` substituters, only `https`.
@@ -34,6 +40,10 @@ Does not check signatures from the upstream cache. Don't use `http` substituters
 If you expose this server to the public, be aware that anybody can request
 files from very big archives, and the server will unpack them on demand,
 possibly leading to very large resource usage.
+
+If you point nixseparatedebuginfod2 to the local store (`--substituter local:`)
+it will happily serve any file in your store. Of course you don't have secrets
+in your store, do you?
 
 ### License
 
