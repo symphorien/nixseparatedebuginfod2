@@ -6,7 +6,10 @@ pub mod file;
 pub mod http;
 /// serve debuginfo from your own store
 pub mod local;
-use std::path::Path;
+/// combine several substituters in one single virtual one
+pub mod multiplex;
+
+use std::{path::Path, sync::Arc};
 
 use anyhow::Context;
 use file::FileSubstituter;
@@ -17,12 +20,28 @@ use serde::Deserialize;
 
 use crate::{build_id::BuildId, store_path::StorePath, utils::Presence};
 
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Clone, Copy)]
+/// Encodes if a substituters should be tried first or last in case several substituters are
+/// available
+pub enum Priority {
+    /// Data is local and already unpacked
+    LocalUnpacked,
+    /// Data is local but compressed
+    Local,
+    /// Unknown
+    Unknown,
+    /// Data must be downloaded from the internet
+    Remote,
+}
+
 /// Fetching nars from a nix substituter, aka binary cache.
 #[async_trait::async_trait]
-pub trait Substituter {
+pub trait Substituter: std::fmt::Debug {
     /// Fetches the debug output containing the files for this build-id.
     ///
     /// `into` should be the root of the extracted nar, not the path to the build id files.
+    ///
+    /// `into` may be created even in case of error
     async fn build_id_to_debug_output(
         &self,
         build_id: &BuildId,
@@ -38,11 +57,18 @@ pub trait Substituter {
     /// `/nix/store/hash-name/foo/bar` rather than just `/nix/store/hash-name`,
     /// then the `foo/bar` part must be ignored and all of `/nix/store/hash-name`
     /// must be extracted into `into`.
+    ///
+    /// `into` may be created even in case of error
     async fn fetch_store_path(
         &self,
         store_path: &StorePath,
         into: &Path,
     ) -> anyhow::Result<Presence>;
+
+    /// A value indicating if this substituter should be tried first if several are available
+    ///
+    /// Low values mean first
+    fn priority(&self) -> Priority;
 }
 
 /// Structure of the metadata files created by the `index-debug-info` option of substituters
@@ -52,6 +78,29 @@ pub struct DebugInfoRedirectJson {
     pub archive: String,
     /// relative path to the file inside of the nar
     pub member: String,
+}
+
+#[async_trait::async_trait]
+impl<S: Substituter + Send + Sync> Substituter for Arc<S> {
+    async fn build_id_to_debug_output(
+        &self,
+        build_id: &BuildId,
+        into: &Path,
+    ) -> anyhow::Result<Presence> {
+        self.as_ref().build_id_to_debug_output(build_id, into).await
+    }
+
+    async fn fetch_store_path(
+        &self,
+        store_path: &StorePath,
+        into: &Path,
+    ) -> anyhow::Result<Presence> {
+        self.as_ref().fetch_store_path(store_path, into).await
+    }
+
+    fn priority(&self) -> Priority {
+        self.as_ref().priority()
+    }
 }
 
 /// A substituters of unspecified implementation.

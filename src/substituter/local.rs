@@ -8,9 +8,10 @@ use crate::{
     utils::Presence,
 };
 
-use super::Substituter;
+use super::{Priority, Substituter};
 
 /// serves store paths directly available locally in `/nix/store`
+#[derive(Debug)]
 pub struct LocalStoreSubstituter;
 
 fn find_buildid_in_store(build_id: &BuildId) -> anyhow::Result<Option<PathBuf>> {
@@ -67,5 +68,9 @@ impl Substituter for LocalStoreSubstituter {
                 Ok(Presence::Found)
             }
         }
+    }
+
+    fn priority(&self) -> Priority {
+        Priority::LocalUnpacked
     }
 }

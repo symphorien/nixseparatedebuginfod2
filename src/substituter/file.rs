@@ -16,7 +16,7 @@ use crate::{
     utils::{DecompressingReader, Presence},
 };
 
-use super::{DebugInfoRedirectJson, Substituter};
+use super::{DebugInfoRedirectJson, Priority, Substituter};
 
 const SMALL_FILE_SIZE: usize = 1024 * 1024 - 1;
 
@@ -176,6 +176,10 @@ impl Substituter for FileSubstituter {
             .with_context(|| format!("parsing {}", narinfo_path.display()))?;
         let nar_path = self.path.join(url);
         self.return_nar(&nar_path, into).await
+    }
+
+    fn priority(&self) -> Priority {
+        Priority::Local
     }
 }
 

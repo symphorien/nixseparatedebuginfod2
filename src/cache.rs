@@ -21,7 +21,7 @@ use crate::{
     vfs::RestrictedPath,
 };
 
-/// Fetchers are called to writer in a directory there.
+/// Fetchers are called to write in a directory there.
 ///
 /// Only if they complete successfully the output is moved to [`CACHE`]
 const PARTIAL: &str = "partial";

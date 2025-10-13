@@ -15,7 +15,7 @@ use crate::{
     utils::{DecompressingReader, Presence},
 };
 
-use super::{DebugInfoRedirectJson, Substituter};
+use super::{DebugInfoRedirectJson, Priority, Substituter};
 
 const USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
 
@@ -139,6 +139,10 @@ impl Substituter for HttpSubstituter {
             .with_context(|| format!("parsing {}", narinfo_url))?;
         let nar_url = self.make_url(&url)?;
         self.return_nar(nar_url, into).await
+    }
+
+    fn priority(&self) -> Priority {
+        Priority::Unknown
     }
 }
 

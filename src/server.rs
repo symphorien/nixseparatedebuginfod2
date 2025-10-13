@@ -22,7 +22,7 @@ use tokio_util::io::ReaderStream;
 
 use crate::build_id::BuildId;
 use crate::debuginfod::Debuginfod;
-use crate::substituter::substituter_from_url;
+use crate::substituter::multiplex::MultiplexingSubstituter;
 use crate::vfs::AsFile;
 use crate::Options;
 
@@ -118,10 +118,15 @@ fn assert_send<'a, T, U: std::future::Future<Output = T> + Send + 'a>(fut: U) ->
 ///
 /// Does not actually return.
 pub async fn run_server(args: Options) -> anyhow::Result<()> {
-    let substituter = substituter_from_url(&args.substituter).await?;
+    let substituter = MultiplexingSubstituter::new_from_urls(args.substituter.iter()).await?;
     let state = ServerState {
         debuginfod: Arc::new(
-            Debuginfod::new(PathBuf::from(&args.cache_dir), substituter, args.expiration).await?,
+            Debuginfod::new(
+                PathBuf::from(&args.cache_dir),
+                Box::new(substituter),
+                args.expiration,
+            )
+            .await?,
         ),
     };
     state.debuginfod.spawn_cleanup_task();

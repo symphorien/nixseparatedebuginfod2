@@ -43,9 +43,20 @@ pub struct Options {
     /// Address for the server
     #[arg(short, long, default_value = "127.0.0.1:1949")]
     listen_address: SocketAddr,
-    /// Substituter (aka binary cache) containing the debug symbols
+    /// Substituter (aka binary cache) containing the debug symbols.
+    ///
+    /// Can be specified several times, all subsituters will be tried in sequence.
+    ///
+    /// Supported subsituter URLs:
+    ///
+    /// - `local:` to serve debug symbols already present in the local store
+    ///
+    /// - `https://cache.nixos.org` for example for http subsitututers
+    ///
+    /// - `file:///some/dir` for directories created by `nix copy ... --to
+    /// file:///some/dir?index-debug-info`
     #[arg(short, long)]
-    substituter: Url,
+    substituter: Vec<Url>,
     /// Directory where files downloaded from the substituter are stored
     #[arg(short, long, default_value_t = default_cache_directory())]
     cache_dir: String,
