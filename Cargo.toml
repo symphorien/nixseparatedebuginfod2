@@ -37,7 +37,7 @@ nix = { version = "0.30.1", features = ["fs"] }
 assert_cmd = "2.0.17"
 hmac-sha256 = "1"
 http-handle = "0.0.2"
-port_check = "0.2.1"
+port_check = "0.3.0"
 rand = "0.9.1"
 reqwest = { version = "0.12.15", features = ["blocking"] }
 tempfile = "3"
