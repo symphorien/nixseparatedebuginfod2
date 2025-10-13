@@ -164,7 +164,7 @@ impl<Key: FetcherCacheKey + 'static, Fetcher: CachableFetcher<Key> + 'static>
         result
     }
     #[instrument(level = Level::TRACE, skip_all, fields(key=key.as_key()))]
-    async fn read_lock<'a>(&'a self, key: Key) -> ReadLockedCacheEntry<Key> {
+    async fn read_lock(&self, key: Key) -> ReadLockedCacheEntry<Key> {
         let actual_key = key.as_key();
         let target = self.root_dir.join(CACHE).join(actual_key);
         let entry_lock = self.entry_lock(actual_key).await;
@@ -202,7 +202,7 @@ impl<Key: FetcherCacheKey + 'static, Fetcher: CachableFetcher<Key> + 'static>
     }
 
     #[instrument(level = Level::TRACE, skip(self))]
-    async fn try_write_lock<'a, 'b>(&'a self, key: &'b str) -> Option<RwLockWriteGuardArc<()>> {
+    async fn try_write_lock(&self, key: &str) -> Option<RwLockWriteGuardArc<()>> {
         let entry_lock = self.entry_lock(key).await;
 
         entry_lock.try_write_arc()
@@ -212,9 +212,9 @@ impl<Key: FetcherCacheKey + 'static, Fetcher: CachableFetcher<Key> + 'static>
     /// updates its mtime to remember that it was used, if it is older than some proportion of the cache expiry
     /// time.
     #[instrument(level = Level::TRACE, skip_all, fields(key=key.key.as_key()))]
-    async fn cached<'cache, 'key, Lock>(
-        &'cache self,
-        key: &'key LockedCacheEntry<Key, Lock>,
+    async fn cached<Lock>(
+        &self,
+        key: &LockedCacheEntry<Key, Lock>,
     ) -> anyhow::Result<Option<PathBuf>> {
         let expiration = self.expiration;
         match tokio::fs::symlink_metadata(&key.target).await {
