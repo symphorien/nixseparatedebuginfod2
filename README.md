@@ -1,7 +1,7 @@
-# proof of concept debuginfod server for nix
+# Debuginfod server for Nixpkgs
 
-Contrary to nixseparatedebuginfod, this works by relying on the indexation hydra does only.
-
+nixseparatedebuginfod2 is the successor of nixseparatedebuginfod.
+Contrary to nixseparatedebuginfod, this one works by relying on the indexation hydra does only.
 It proxifies the debuginfo stored in a substituter, storing temporary data in a cache directory.
 
 substituters must be created with the `index-debug-info` options:
@@ -32,6 +32,15 @@ and set the environment variable `DEBUGINFOD_URLS=http://127.0.0.1:1949`.
 nixseparatedebuginfod2 can provide source files for packages built from nixos-25.11 (nixos-unstable at the time I write this) only.
 Package built with older stdenv will only provide debuginfo. Source files which
 are patched during the build should be served patched correctly in most cases.
+
+### Migration from nixseparatedebuginfod
+
+If you only use the default binary cache then this invocation is a drop-in replacement:
+```
+nixseparatedebuginfod2 --substituter local: --substituter https://cache.nixos.org --expiration "1 day"
+```
+
+If you use other http caches, add them to `--substituter`. If you use ssh substituters, then nixseparatedebuginfod2 cannot handle them directly. Consider running nixseparatedebuginfod2 there.
 
 ### Warning
 
