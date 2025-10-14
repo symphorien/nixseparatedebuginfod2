@@ -1,6 +1,6 @@
 [package]
 name = "nixseparatedebuginfod2"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 authors = ["Guillaume Girol <symphorien+git@xlumurb.eu>"]
 license = "GPL-3.0"
