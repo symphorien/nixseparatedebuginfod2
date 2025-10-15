@@ -91,5 +91,11 @@ fn start_http_binary_cache() -> Url {
     let server =
         http_handle::server::Server::new(&format!("127.0.0.1:{port}"), dir.to_str().unwrap());
     std::thread::spawn(move || server.start().unwrap());
+    while !port_check::is_port_reachable_with_timeout(
+        ("127.0.0.1", port),
+        std::time::Duration::from_millis(300),
+    ) {
+        std::thread::sleep(std::time::Duration::from_millis(100))
+    }
     Url::parse(&format!("http://127.0.0.1:{port}")).unwrap()
 }
