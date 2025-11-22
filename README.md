@@ -33,14 +33,39 @@ nixseparatedebuginfod2 can provide source files for packages built from nixos-25
 Package built with older stdenv will only provide debuginfo. Source files which
 are patched during the build should be served patched correctly in most cases.
 
+### Using the NixOS module
+
+`nixseparatedebuginfod2` is available on NixOS starting with version 25.11.
+
+[![Packaging status](https://repology.org/badge/vertical-allrepos/nixseparatedebuginfod2.svg)](https://repology.org/project/nixseparatedebuginfod2/versions)
+
+If you are not using custom substituters, then this configuration in `/etc/nixos/configuration.nix` should be enough:
+```nix
+{ config, pkgs, lib, ... }: {
+    config = {
+      /* rest of your config */
+      services.nixseparatedebuginfod2.enable = true;
+    };
+}
+```
+
 ### Migration from nixseparatedebuginfod
 
 If you only use the default binary cache then this invocation is a drop-in replacement:
 ```
 nixseparatedebuginfod2 --substituter local: --substituter https://cache.nixos.org --expiration "1 day"
 ```
+or on NixOS >=25.11:
+```nix
+{ config, pkgs, lib, ... }: {
+    config = {
+      /* rest of your config */
+      services.nixseparatedebuginfod2.enable = true;
+    };
+}
+```
 
-If you use other http caches, add them to `--substituter`. If you use ssh substituters, then nixseparatedebuginfod2 cannot handle them directly. Consider running nixseparatedebuginfod2 there.
+If you use other http caches, add them to `--substituter` on the CLI or in the `services.nixseparatedebuginfod2.substituters` NixOS option. If you use ssh substituters, then nixseparatedebuginfod2 cannot handle them directly. Consider running nixseparatedebuginfod2 on the substituters themselves.
 
 ### Warning
 
