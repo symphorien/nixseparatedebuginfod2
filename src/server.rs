@@ -171,6 +171,9 @@ pub async fn run_server(args: Options) -> anyhow::Result<()> {
         .into_iter()
         .map(|l| axum::serve::serve(l, app.clone().into_make_service()).into_future())
         .collect();
+    if let Err(e) = systemd::daemon::notify(false, [(systemd::daemon::STATE_READY, "1")].iter()) {
+        tracing::warn!("failed to notify systemd READY=1: {e}");
+    }
     let mut last_err = Ok(());
     while let Some(result) = server.next().await {
         if let Err(e) = result {
