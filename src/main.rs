@@ -100,5 +100,6 @@ async fn main() -> anyhow::Result<()> {
 
     registry.init();
 
+    anyhow::ensure!(!args.substituter.is_empty(), "no substituter specified with --substituter option. Pass `--substituter local: --substituter https://cache.nixos.org` for example.");
     server::run_server(args).await
 }
