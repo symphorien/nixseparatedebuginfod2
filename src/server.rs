@@ -13,8 +13,10 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{routing::get, Router};
+use futures::StreamExt as _;
 use http::header::{HeaderMap, CONTENT_LENGTH};
 use std::fmt::Debug;
+use std::future::IntoFuture as _;
 use std::os::unix::prelude::MetadataExt;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -137,9 +139,44 @@ pub async fn run_server(args: Options) -> anyhow::Result<()> {
         .route("/buildid/{buildid}/debuginfo", get(get_debuginfo))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(state);
-    let listener = tokio::net::TcpListener::bind(&args.listen_address)
-        .await
-        .with_context(|| format!("opening listen socket on {}", &args.listen_address))?;
-    axum::serve::serve(listener, app.into_make_service()).await?;
-    Ok(())
+    let listeners = match args.listen_address {
+        Some(addr) => vec![tokio::net::TcpListener::bind(addr)
+            .await
+            .with_context(|| format!("opening listen socket on {}", addr))?],
+        None => {
+            let fds = systemd::daemon::listen_fds(false)
+                .context("listing socket activation file descriptors")?;
+            let mut listeners = vec![];
+            for fd in fds.iter() {
+                let std_listener = systemd::daemon::tcp_listener(fd)
+                    .with_context(|| format!("socket activation yielded bad fd {fd}"))?;
+                std_listener.set_nonblocking(true).with_context(|| {
+                    format!("failed to set socket activation fd {fd} non blocking")
+                })?;
+                let listener = tokio::net::TcpListener::from_std(std_listener)
+                    .with_context(|| format!("socket activation yielded bad fd {fd} for async"))?;
+                listeners.push(listener);
+            }
+            listeners
+        }
+    };
+    anyhow::ensure!(!listeners.is_empty(), "no listen address was specified with --listen-address and systemd socket activation was not used");
+    for l in listeners.iter() {
+        match l.local_addr() {
+            Ok(a) => tracing::info!("listening on {a}"),
+            Err(e) => tracing::warn!("listening on unknown address: {e}"),
+        };
+    }
+    let mut server: futures::stream::FuturesUnordered<_> = listeners
+        .into_iter()
+        .map(|l| axum::serve::serve(l, app.clone().into_make_service()).into_future())
+        .collect();
+    let mut last_err = Ok(());
+    while let Some(result) = server.next().await {
+        if let Err(e) = result {
+            tracing::error!("failed to serve: {e}");
+            last_err = Err(e).context("running server");
+        }
+    }
+    last_err
 }

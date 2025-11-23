@@ -41,8 +41,10 @@ pub mod test_utils;
 #[command(author, version, about, long_about = None)]
 pub struct Options {
     /// Address for the server
-    #[arg(short, long, default_value = "127.0.0.1:1949")]
-    listen_address: SocketAddr,
+    ///
+    /// If omitted, systemd socket activation is expected.
+    #[arg(short, long)]
+    listen_address: Option<SocketAddr>,
     /// Substituter (aka binary cache) containing the debug symbols.
     ///
     /// Can be specified several times, all subsituters will be tried in sequence.

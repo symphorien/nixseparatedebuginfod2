@@ -14,15 +14,15 @@ nix copy ... --to file://...?index-debug-info=true
 then you can run
 
 ```
-cargo run -- --substituter file://... --expiration "1 day"
+cargo run -- --listen-address 127.0.0.1:1949 --substituter file://... --expiration "1 day"
 ```
 or
 ```
-cargo run -- --substituter https://cache.nixos.org --expiration "1 day"
+cargo run -- --listen-address 127.0.0.1:1949 --substituter https://cache.nixos.org --expiration "1 day"
 ```
 or
 ```
-cargo run -- --substituter local: --expiration "1 day"
+cargo run -- --listen-address 127.0.0.1:1949 --substituter local: --expiration "1 day"
 ```
 
 and set the environment variable `DEBUGINFOD_URLS=http://127.0.0.1:1949`.
@@ -53,7 +53,7 @@ If you are not using custom substituters, then this configuration in `/etc/nixos
 
 If you only use the default binary cache then this invocation is a drop-in replacement:
 ```
-nixseparatedebuginfod2 --substituter local: --substituter https://cache.nixos.org --expiration "1 day"
+nixseparatedebuginfod2 --listen-address 127.0.0.1:1949 --substituter local: --substituter https://cache.nixos.org --expiration "1 day"
 ```
 or on NixOS >=25.11:
 ```nix

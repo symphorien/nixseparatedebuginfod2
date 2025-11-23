@@ -32,6 +32,7 @@ walkdir = "2.5.0"
 compress-tools = { version = "0.15.1", features = ["tokio_support"] }
 http-body-util = "0.1.3"
 nix = { version = "0.30.1", features = ["fs"] }
+systemd = { version = "0.10.1", default-features = false }
 
 [dev-dependencies]
 assert_cmd = "2.0.17"
@@ -41,7 +42,8 @@ port_check = "0.3.0"
 rand = "0.9.1"
 reqwest = { version = "0.12.15", features = ["blocking"] }
 tempfile = "3"
-nix = { version = "0.30.1", features = ["signal"] }
+nix = { version = "0.30.1", features = ["signal", "process"] }
+command-fds = "0.3"
 
 [features]
 # to use it, uncomment the content of .cargo/config.toml

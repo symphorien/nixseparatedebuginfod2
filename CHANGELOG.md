@@ -1,3 +1,7 @@
+v2.0.0:
+
+- breaking change: omitting `--listen-address` now means that systemd socket activation should be used.
+
 v1.0.1:
 - fix flaky test
 

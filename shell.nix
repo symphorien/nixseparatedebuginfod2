@@ -24,6 +24,6 @@ mkShell {
     elfutils
   ]
   ++ lib.optionals (!gdb.meta.unsupported) [gdb];
-  buildInputs = [ libarchive ];
+  buildInputs = [ libarchive systemd ];
   RUST_BACKTRACE="full";
 }
