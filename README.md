@@ -46,22 +46,6 @@ otherwise, it will ask for confirmation every time.
 `valgrind` needs `debuginfod-find` on `$PATH` to use `nixseparatedebuginfod2`.
 Add `(lib.getBin pkgs.elfutils)` to `environment.systemPackages` or `home.packages`.
 
-### Using the NixOS module
-
-`nixseparatedebuginfod2` is available on NixOS starting with version 25.11.
-
-[![Packaging status](https://repology.org/badge/vertical-allrepos/nixseparatedebuginfod2.svg)](https://repology.org/project/nixseparatedebuginfod2/versions)
-
-If you are not using custom substituters, then this configuration in `/etc/nixos/configuration.nix` should be enough:
-```nix
-{ config, pkgs, lib, ... }: {
-    config = {
-      /* rest of your config */
-      services.nixseparatedebuginfod2.enable = true;
-    };
-}
-```
-
 ### Checking that it all works
 
 For example, `gnumake` is compiled with `separateDebugInfo = true` as of NixOS 25.11:
