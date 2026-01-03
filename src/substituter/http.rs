@@ -1,21 +1,15 @@
-use std::{fmt::Debug, path::Path};
+use std::fmt::Debug;
 
 use anyhow::Context;
 use futures::StreamExt;
 use http::StatusCode;
-use http_body_util::{BodyExt, Limited};
-use reqwest::{Client, Response, Url};
+use reqwest::{Client, Url};
+use tokio::io::AsyncBufRead;
 use tokio_util::io::StreamReader;
-use tracing::Level;
 
-use crate::{
-    build_id::BuildId,
-    nar::{narinfo_to_nar_location, unpack_nar},
-    store_path::StorePath,
-    utils::{DecompressingReader, Presence},
-};
+use crate::substituter::binary_cache::BinaryCache;
 
-use super::{DebugInfoRedirectJson, Priority, Substituter};
+use super::Priority;
 
 const USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
 
@@ -49,27 +43,17 @@ impl HttpSubstituter {
             .join(rest)
             .with_context(|| format!("{}{rest} is malformed url", &self.url))
     }
+}
 
-    async fn return_nar(&self, nar_url: Url, into: &Path) -> anyhow::Result<Presence> {
-        let Some(response) = self.query(&nar_url).await? else {
-            return Ok(Presence::NotFound);
-        };
-        let stream = response.bytes_stream();
-        let nar_reader = StreamReader::new(stream.map(|r| r.map_err(std::io::Error::other)));
-        let decompressing_nar_reader = DecompressingReader::new(
-            tokio::io::BufReader::new(nar_reader),
-            nar_url.as_str().as_bytes(),
-        )?;
-        unpack_nar(decompressing_nar_reader, into).await?;
-
-        Ok(Presence::Found)
-    }
-
+impl BinaryCache for HttpSubstituter {
     /// sends a get query to this url, and returns the response only if 200
     ///
     /// returns None on 404, an error in other cases.
-    #[tracing::instrument(level=Level::TRACE, err, skip(url), fields(url=%url))]
-    async fn query(&self, url: &Url) -> anyhow::Result<Option<Response>> {
+    async fn stream_location(
+        &self,
+        what: &str,
+    ) -> anyhow::Result<Option<impl AsyncBufRead + Send>> {
+        let url = self.make_url(what)?;
         let response = self
             .client
             .get(url.clone())
@@ -84,61 +68,10 @@ impl HttpSubstituter {
             }
             other => anyhow::bail!("{url} returned {other:?}"),
         };
-        Ok(Some(response))
-    }
-}
-
-const SMALL_BODY_SIZE: usize = 1024 * 1024 - 1;
-
-#[async_trait::async_trait]
-impl Substituter for HttpSubstituter {
-    async fn build_id_to_debug_output(
-        &self,
-        build_id: &BuildId,
-        into: &std::path::Path,
-    ) -> anyhow::Result<Presence> {
-        // for cache.nixos.org
-        let url1 = self.make_url(&format!("debuginfo/{}", build_id))?;
-        // for file:// binary caches
-        let url2 = self.make_url(&format!("debuginfo/{}.debug", build_id))?;
-        let (url, response) = match self.query(&url1).await? {
-            Some(r) => (url1, r),
-            None => match self.query(&url2).await? {
-                Some(r) => (url2, r),
-                None => return Ok(Presence::NotFound),
-            },
-        };
-        let body = Limited::new(
-            std::convert::Into::<reqwest::Body>::into(response),
-            SMALL_BODY_SIZE,
-        );
-        let json_bytes = body
-            .collect()
-            .await
-            .map_err(|e| anyhow::anyhow!("downloading {url}: {e:#}"))?
-            .to_bytes();
-        let redirect: DebugInfoRedirectJson = serde_json::from_slice(&json_bytes)
-            .with_context(|| format!("unexpected format for {}", url))?;
-        let nar_url = self.make_url(&format!("debuginfo/{}", &redirect.archive))?;
-        self.return_nar(nar_url, into).await
-    }
-
-    async fn fetch_store_path(
-        &self,
-        store_path: &StorePath,
-        into: &std::path::Path,
-    ) -> anyhow::Result<Presence> {
-        let narinfo_url = self.make_url(&format!("{}.narinfo", store_path.hash()))?;
-        let Some(response) = self.query(&narinfo_url).await? else {
-            return Ok(Presence::NotFound);
-        };
         let stream = response.bytes_stream();
         let reader = StreamReader::new(stream.map(|r| r.map_err(std::io::Error::other)));
-        let url = narinfo_to_nar_location(reader)
-            .await
-            .with_context(|| format!("parsing {}", narinfo_url))?;
-        let nar_url = self.make_url(&url)?;
-        self.return_nar(nar_url, into).await
+
+        Ok(Some(reader))
     }
 
     fn priority(&self) -> Priority {
@@ -148,7 +81,14 @@ impl Substituter for HttpSubstituter {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_utils::{file_sha256, HTTP_BINARY_CACHE};
+    use crate::{
+        build_id::BuildId,
+        store_path::StorePath,
+        substituter::Substituter,
+        test_utils::{file_sha256, HTTP_BINARY_CACHE},
+        utils::Presence,
+    };
+    use std::path::Path;
 
     use super::*;
 

@@ -1,76 +1,14 @@
 use std::{
     fmt::Debug,
-    ops::Deref,
-    os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
 };
 
 use anyhow::Context;
-use tokio::io::{AsyncReadExt, BufReader};
+use tokio::io::AsyncBufRead;
 
-use crate::nar::unpack_nar;
-use crate::{
-    build_id::BuildId,
-    nar::narinfo_to_nar_location,
-    store_path::StorePath,
-    utils::{DecompressingReader, Presence},
-};
+use crate::substituter::binary_cache::BinaryCache;
 
-use super::{DebugInfoRedirectJson, Priority, Substituter};
-
-const SMALL_FILE_SIZE: usize = 1024 * 1024 - 1;
-
-/// Returns the content of the specified file
-///
-/// Fails if the file is larger than `SMALL_FILE_SIZE`.
-///
-/// Returns None if the file does not exist.
-async fn read_small_file(path: &Path) -> anyhow::Result<Option<Vec<u8>>> {
-    let file = match tokio::fs::File::open(path).await {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e).with_context(|| format!("opening {}", path.display())),
-        Ok(file) => file,
-    };
-    let mut limited = file.take(SMALL_FILE_SIZE as u64 + 1);
-    let mut result = Vec::with_capacity(100);
-    limited
-        .read_to_end(&mut result)
-        .await
-        .with_context(|| format!("reading {}", path.display()))?;
-    anyhow::ensure!(
-        result.len() <= SMALL_FILE_SIZE,
-        "{} is too large; expected file unter {} bytes",
-        path.display(),
-        SMALL_FILE_SIZE
-    );
-    Ok(Some(result))
-}
-
-#[tokio::test]
-async fn test_read_small_file_small() {
-    let small = vec![b'a'; SMALL_FILE_SIZE];
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("test");
-    std::fs::write(&file, &small).unwrap();
-    let read = read_small_file(&file).await.unwrap().unwrap();
-    assert_eq!(&read, &small);
-}
-
-#[tokio::test]
-async fn test_read_small_file_big() {
-    let small = vec![b'a'; SMALL_FILE_SIZE + 1];
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("test");
-    std::fs::write(&file, &small).unwrap();
-    read_small_file(&file).await.unwrap_err();
-}
-
-#[tokio::test]
-async fn test_read_small_file_missing() {
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("test");
-    read_small_file(&file).await.unwrap().ok_or(()).unwrap_err();
-}
+use super::Priority;
 
 /// Fetching from `file://` substituters.
 ///
@@ -95,87 +33,31 @@ impl FileSubstituter {
         assert!(path.exists());
         FileSubstituter::new(&path)
     }
+}
 
-    async fn return_nar(&self, nar_path: &Path, into: &Path) -> anyhow::Result<Presence> {
-        let nar_path = match tokio::fs::canonicalize(nar_path).await {
+impl BinaryCache for FileSubstituter {
+    async fn stream_location(
+        &self,
+        what: &str,
+    ) -> anyhow::Result<Option<impl AsyncBufRead + Send>> {
+        let full_path = self.path.join(what);
+        let full_path = match tokio::fs::canonicalize(&full_path).await {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                tracing::info!(
-                    "{:?}: got redirected to missing nar {}",
-                    &self,
-                    nar_path.display()
-                );
-                return Ok(Presence::NotFound);
+                return Ok(None);
             }
-            Err(e) => return Err(e).context(format!("canonicalize({})", nar_path.display())),
+            Err(e) => return Err(e).context(format!("canonicalize({})", full_path.display())),
             Ok(path) => path,
         };
         anyhow::ensure!(
-            nar_path.starts_with(&self.path),
-            "redirected to nar path {nar_path:?} that escapes the Substituter {:?}",
+            full_path.starts_with(&self.path),
+            "redirected to nar path {full_path:?} that escapes the Substituter {:?}",
             &self.path,
         );
-        let nar_reader = match tokio::fs::File::open(&nar_path).await {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                tracing::info!(
-                    "{:?}: got redirected to missing nar: failed to open {}",
-                    &self,
-                    nar_path.display()
-                );
-                return Ok(Presence::NotFound);
-            }
-            Err(e) => return Err(e).context(format!("opening nar {}", nar_path.display())),
-            Ok(reader) => tokio::io::BufReader::new(reader),
-        };
-        let decompressing_nar_reader =
-            DecompressingReader::new(nar_reader, nar_path.as_os_str().as_bytes())?;
-        unpack_nar(decompressing_nar_reader, into).await?;
-
-        Ok(Presence::Found)
-    }
-}
-
-#[async_trait::async_trait]
-impl Substituter for FileSubstituter {
-    async fn build_id_to_debug_output(
-        &self,
-        build_id: &BuildId,
-        into: &std::path::Path,
-    ) -> anyhow::Result<Presence> {
-        let meta = self.path.join(format!("debuginfo/{}.debug", build_id));
-        let Some(json) = read_small_file(&meta)
-            .await
-            .context("looking for json redirect to debuginfo")?
-        else {
-            tracing::debug!(
-                build_id = build_id.deref(),
-                "{} is missing from {:?}",
-                meta.display(),
-                &self
-            );
-            return Ok(Presence::NotFound);
-        };
-        let redirect: DebugInfoRedirectJson = serde_json::from_slice(&json)
-            .with_context(|| format!("unexpected format for {}", meta.display()))?;
-        let nar_path = self.path.join("debuginfo").join(&redirect.archive);
-        self.return_nar(&nar_path, into).await
-    }
-
-    async fn fetch_store_path(
-        &self,
-        store_path: &StorePath,
-        into: &std::path::Path,
-    ) -> anyhow::Result<Presence> {
-        let narinfo_path = self.path.join(format!("{}.narinfo", store_path.hash()));
-        let fd = match tokio::fs::File::open(&narinfo_path).await {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Presence::NotFound),
-            Err(e) => return Err(e).context(format!("opening {}", narinfo_path.display())),
-            Ok(fd) => BufReader::new(fd),
-        };
-        let url = narinfo_to_nar_location(fd)
-            .await
-            .with_context(|| format!("parsing {}", narinfo_path.display()))?;
-        let nar_path = self.path.join(url);
-        self.return_nar(&nar_path, into).await
+        match tokio::fs::File::open(&full_path).await {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e).context(format!("opening nar {}", full_path.display())),
+            Ok(reader) => Ok(Some(tokio::io::BufReader::new(reader))),
+        }
     }
 
     fn priority(&self) -> Priority {
@@ -185,6 +67,7 @@ impl Substituter for FileSubstituter {
 
 #[tokio::test]
 async fn test_build_id_to_debug_output() {
+    use crate::substituter::Substituter;
     use crate::test_utils::file_sha256;
     use crate::test_utils::setup_logging;
     setup_logging();
@@ -194,12 +77,12 @@ async fn test_build_id_to_debug_output() {
     assert_eq!(
         substituter
             .build_id_to_debug_output(
-                &BuildId::new("b87e34547e94f167f4b737f3a25955477a485cc7").unwrap(),
+                &crate::build_id::BuildId::new("b87e34547e94f167f4b737f3a25955477a485cc7").unwrap(),
                 &into
             )
             .await
             .unwrap(),
-        Presence::Found
+        crate::utils::Presence::Found
     );
     assert_eq!(
         file_sha256(
@@ -212,6 +95,7 @@ async fn test_build_id_to_debug_output() {
 
 #[tokio::test]
 async fn test_fetch_store_path() {
+    use crate::substituter::Substituter;
     use crate::test_utils::file_sha256;
     use crate::test_utils::setup_logging;
     setup_logging();
@@ -221,7 +105,7 @@ async fn test_fetch_store_path() {
     assert_eq!(
         substituter
             .fetch_store_path(
-                &StorePath::new(Path::new(
+                &crate::store_path::StorePath::new(Path::new(
                     "/nix/store/34j18r2rpi7js1whmvzm9wliad55rilr-gnumake-4.4.1"
                 ))
                 .unwrap(),
@@ -229,7 +113,7 @@ async fn test_fetch_store_path() {
             )
             .await
             .unwrap(),
-        Presence::Found
+        crate::utils::Presence::Found
     );
     assert_eq!(
         file_sha256(&into.join("bin/make")).await,

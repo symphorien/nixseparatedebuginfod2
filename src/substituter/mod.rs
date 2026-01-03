@@ -8,6 +8,8 @@
 //! So the [LocalStoreSubstituter] serves a substituters which is not a binary cache, but
 //! [HttpSubstituter] and [FileSubstituter] refer to substituters which are binary caches.
 
+/// Common code between substituters which are actually binary caches
+pub mod binary_cache;
 /// support for `file://` substituters
 pub mod file;
 /// support for `http://` and `https://` substituters
@@ -24,7 +26,6 @@ use file::FileSubstituter;
 use http::HttpSubstituter;
 use local::LocalStoreSubstituter;
 use reqwest::Url;
-use serde::Deserialize;
 
 use crate::{build_id::BuildId, store_path::StorePath, utils::Presence};
 
@@ -77,15 +78,6 @@ pub trait Substituter: std::fmt::Debug {
     ///
     /// Low values mean first
     fn priority(&self) -> Priority;
-}
-
-/// Structure of the metadata files created by the `index-debug-info` option of substituters
-#[derive(Deserialize)]
-pub struct DebugInfoRedirectJson {
-    /// relative path to the nar.xz
-    pub archive: String,
-    /// relative path to the file inside of the nar
-    pub member: String,
 }
 
 #[async_trait::async_trait]
