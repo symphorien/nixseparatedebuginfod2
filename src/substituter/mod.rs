@@ -1,4 +1,12 @@
-//! Fetching nars from nix substituters, aka binary caches.
+//! Fetching nars from nix substituters.
+//!
+//! About terminology:
+//! The glossary of the nix manual says:
+//!
+//! > An additional store from which Nix can obtain store objects instead of building them. Often the substituter is a binary cache, but any store can serve as substituter.
+//!
+//! So the [LocalStoreSubstituter] serves a substituters which is not a binary cache, but
+//! [HttpSubstituter] and [FileSubstituter] refer to substituters which are binary caches.
 
 /// support for `file://` substituters
 pub mod file;
@@ -34,7 +42,7 @@ pub enum Priority {
     Remote,
 }
 
-/// Fetching nars from a nix substituter, aka binary cache.
+/// Fetching debuginfo from a nix substituter
 #[async_trait::async_trait]
 pub trait Substituter: std::fmt::Debug {
     /// Fetches the debug output containing the files for this build-id.

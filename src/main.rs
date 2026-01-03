@@ -1,8 +1,8 @@
-//! A debuginfod server suitable to serve debug symbols from nix binary caches.
+//! A debuginfod server suitable to serve debug symbols from nix substituters.
 //!
 //! ### Architecture
 //!
-//! Support for various kinds of binary caches is in [substituter].
+//! Support for various kinds of substituters is in [substituter].
 //!
 //! Substituters should not be queries too often for the same store path so a cache implementation
 //! is provided in [cache::FetcherCache].
@@ -36,7 +36,7 @@ pub mod vfs;
 #[cfg(test)]
 pub mod test_utils;
 
-/// A debuginfod implementation that fetches debuginfo and sources from nix binary caches
+/// A debuginfod implementation that fetches debuginfo and sources from nix substituters
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Options {
@@ -45,7 +45,7 @@ pub struct Options {
     /// If omitted, systemd socket activation is expected.
     #[arg(short, long)]
     listen_address: Option<SocketAddr>,
-    /// Substituter (aka binary cache) containing the debug symbols.
+    /// Substituter containing the debug symbols.
     ///
     /// Can be specified several times, all subsituters will be tried in sequence.
     ///
@@ -53,7 +53,7 @@ pub struct Options {
     ///
     /// - `local:` to serve debug symbols already present in the local store
     ///
-    /// - `https://cache.nixos.org` for example for http subsitututers
+    /// - `https://cache.nixos.org` for example for http substituters (aka http binary caches)
     ///
     /// - `file:///some/dir` for directories created by `nix copy ... --to
     /// file:///some/dir?index-debug-info`
