@@ -25,10 +25,10 @@ pub struct DebugInfoRedirectJson {
 ///
 /// A binary cache has the following structure:
 /// - a derivation output `/nix/store/hash1-name has a corresponding file `hash1.narinfo` at the
-/// root of the binary cache
+///   root of the binary cache
 /// - the narinfo points to the path of the corresponding nar file
 /// - for each build id contained in the nars, a json file `debug/{buildid}.debug` (or
-/// `debug/{buildid}` points to the corresponding nar (it corresponds to [DebugInfoRedirectJson]).
+///   `debug/{buildid}` points to the corresponding nar (it corresponds to [DebugInfoRedirectJson]).
 pub trait BinaryCache: std::fmt::Debug + Send + Sync {
     /// Returns a reader for this file as contained by the [BinaryCache], or [Presence::NotFound] if
     /// the [BinaryCache] positively does not contains the requested file.
