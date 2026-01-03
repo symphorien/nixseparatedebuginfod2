@@ -76,6 +76,12 @@ async fn read_small_stream_big() {
     read_small_stream(reader).await.unwrap_err();
 }
 
+#[tokio::test]
+async fn read_small_stream_infinite() {
+    let reader = tokio::io::BufReader::new(tokio::io::repeat(b'A'));
+    read_small_stream(reader).await.unwrap_err();
+}
+
 async fn return_nar<T: BinaryCache>(
     cache: &T,
     nar_path: &str,
