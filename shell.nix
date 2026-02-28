@@ -20,10 +20,12 @@ mkShell {
     cargo-watch
     xz
     zstd
+  ]
+  ++ lib.optionals (stdenv.hostPlatform.isLinux) [
     bubblewrap
     elfutils
   ]
   ++ lib.optionals (!gdb.meta.unsupported) [gdb];
-  buildInputs = [ libarchive systemd ];
+  buildInputs = [ libarchive ] ++ lib.optionals (!systemd.meta.unsupported) [ systemd ];
   RUST_BACKTRACE="full";
 }

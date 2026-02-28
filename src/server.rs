@@ -144,23 +144,36 @@ pub async fn run_server(args: Options) -> anyhow::Result<()> {
             .await
             .with_context(|| format!("opening listen socket on {}", addr))?],
         None => {
-            let fds = systemd::daemon::listen_fds(false)
-                .context("listing socket activation file descriptors")?;
-            let mut listeners = vec![];
-            for fd in fds.iter() {
-                let std_listener = systemd::daemon::tcp_listener(fd)
-                    .with_context(|| format!("socket activation yielded bad fd {fd}"))?;
-                std_listener.set_nonblocking(true).with_context(|| {
-                    format!("failed to set socket activation fd {fd} non blocking")
-                })?;
-                let listener = tokio::net::TcpListener::from_std(std_listener)
-                    .with_context(|| format!("socket activation yielded bad fd {fd} for async"))?;
-                listeners.push(listener);
+            #[cfg(feature = "systemd")]
+            {
+                let fds = systemd::daemon::listen_fds(false)
+                    .context("listing socket activation file descriptors")?;
+                let mut listeners = vec![];
+                for fd in fds.iter() {
+                    let std_listener = systemd::daemon::tcp_listener(fd)
+                        .with_context(|| format!("socket activation yielded bad fd {fd}"))?;
+                    std_listener.set_nonblocking(true).with_context(|| {
+                        format!("failed to set socket activation fd {fd} non blocking")
+                    })?;
+                    let listener =
+                        tokio::net::TcpListener::from_std(std_listener).with_context(|| {
+                            format!("socket activation yielded bad fd {fd} for async")
+                        })?;
+                    listeners.push(listener);
+                }
+                listeners
             }
-            listeners
+            #[cfg(not(feature = "systemd"))]
+            {
+                vec![]
+            }
         }
     };
-    anyhow::ensure!(!listeners.is_empty(), "no listen address was specified with --listen-address and systemd socket activation was not used");
+    #[cfg(feature = "systemd")]
+    const ERROR_MSG: &str = "no listen address was specified with --listen-address and systemd socket activation was not used";
+    #[cfg(not(feature = "systemd"))]
+    const ERROR_MSG: &str = "no listen address was specified with --listen-address";
+    anyhow::ensure!(!listeners.is_empty(), ERROR_MSG);
     for l in listeners.iter() {
         match l.local_addr() {
             Ok(a) => tracing::info!("listening on {a}"),
@@ -171,8 +184,12 @@ pub async fn run_server(args: Options) -> anyhow::Result<()> {
         .into_iter()
         .map(|l| axum::serve::serve(l, app.clone().into_make_service()).into_future())
         .collect();
-    if let Err(e) = systemd::daemon::notify(false, [(systemd::daemon::STATE_READY, "1")].iter()) {
-        tracing::warn!("failed to notify systemd READY=1: {e}");
+    #[cfg(feature = "systemd")]
+    {
+        if let Err(e) = systemd::daemon::notify(false, [(systemd::daemon::STATE_READY, "1")].iter())
+        {
+            tracing::warn!("failed to notify systemd READY=1: {e}");
+        }
     }
     let mut last_err = Ok(());
     while let Some(result) = server.next().await {
