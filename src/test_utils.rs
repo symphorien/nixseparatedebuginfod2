@@ -2,7 +2,7 @@
 
 use reqwest::Url;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Once};
 use tracing::Level;
 use tracing_subscriber::filter;
@@ -69,6 +69,17 @@ pub fn setup_logging() {
 
         registry.init();
     });
+}
+
+/// returns the number of direntries in the path
+///
+/// no special handling of symlinks etc. everything is counted naively
+pub fn count_elements_in_dir(dir: &Path) -> usize {
+    #[allow(clippy::suspicious_map)]
+    walkdir::WalkDir::new(dir)
+        .into_iter()
+        .map(|e| e.unwrap())
+        .count()
 }
 
 /// Path to the `tests/fixture` folder of the repo.

@@ -10,7 +10,7 @@ use tokio_util::codec::{FramedRead, LinesCodec};
 
 /// Unpacks the nar passed in argument to the specified path.
 ///
-/// The path must not exist yet.
+/// The path must not exist yet, but its parent must be an existing directory.
 ///
 /// In case of error no guarantee is given that destination is clean.
 ///
@@ -21,6 +21,7 @@ pub async fn unpack_nar<T: AsyncRead + Debug>(nar: T, destination: &Path) -> any
     command.arg(destination);
     command.stdin(Stdio::piped());
     command.kill_on_drop(true);
+    tracing::trace!(cmd=?command, "running nix-store --restore");
     let mut process = command
         .spawn()
         .with_context(|| format!("failed to spawn {:?}", &command))?;

@@ -19,7 +19,11 @@ pub mod local;
 /// combine several substituters in one single virtual one
 pub mod multiplex;
 
-use std::{path::Path, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 
 use anyhow::Context;
 use file::FileSubstituter;
@@ -27,7 +31,7 @@ use http::HttpSubstituter;
 use local::LocalStoreSubstituter;
 use reqwest::Url;
 
-use crate::{build_id::BuildId, store_path::StorePath, utils::Presence};
+use crate::{build_id::BuildId, store_path::StorePath, vfs::RestrictedPath};
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Clone, Copy)]
 /// Encodes if a substituters should be tried first or last in case several substituters are
@@ -46,38 +50,37 @@ pub enum Priority {
 /// Fetching debuginfo from a nix substituter
 #[async_trait::async_trait]
 pub trait Substituter: std::fmt::Debug {
-    /// Fetches the debug output containing the files for this build-id.
+    /// Fetches the debug output corresponding to this build id and returns the path on the
+    /// file-system where this output is cached.
     ///
-    /// `into` should be the root of the extracted nar, not the path to the build id files.
+    /// Until the path is dropped, the cache entry cannot be removed.
     ///
-    /// `into` may be created even in case of error
+    /// Returns None if the substituter does not contain the requested debug output.
     async fn build_id_to_debug_output(
         &self,
         build_id: &BuildId,
-        into: &Path,
-    ) -> anyhow::Result<Presence>;
+    ) -> anyhow::Result<Option<RestrictedPath>>;
 
-    /// Fetches a store path.
+    /// Fetches the requested store path and returns the path on the
+    /// file-system where this output is cached.
     ///
-    /// `into` should be root of the extracted nar, ie contains `bin`, `lib`, etc rather than
-    /// `nix/store/hash-name`.
+    /// Until the path is dropped, the cache entry cannot be removed.
     ///
-    /// If `store_path` is a subdirectory of the full store path, for example
-    /// `/nix/store/hash-name/foo/bar` rather than just `/nix/store/hash-name`,
-    /// then the `foo/bar` part must be ignored and all of `/nix/store/hash-name`
-    /// must be extracted into `into`.
-    ///
-    /// `into` may be created even in case of error
+    /// Returns None if the substituter does not contain the requested debug output.
     async fn fetch_store_path(
         &self,
         store_path: &StorePath,
-        into: &Path,
-    ) -> anyhow::Result<Presence>;
+    ) -> anyhow::Result<Option<RestrictedPath>>;
 
     /// A value indicating if this substituter should be tried first if several are available
     ///
     /// Low values mean first
     fn priority(&self) -> Priority;
+
+    /// Spawn periodic cleaning of caches, if any.
+    ///
+    /// May leak resources, as the trait does not provide a method to stop them.
+    fn spawn_cleanup_task(&self);
 }
 
 #[async_trait::async_trait]
@@ -85,21 +88,23 @@ impl<S: Substituter + Send + Sync> Substituter for Arc<S> {
     async fn build_id_to_debug_output(
         &self,
         build_id: &BuildId,
-        into: &Path,
-    ) -> anyhow::Result<Presence> {
-        self.as_ref().build_id_to_debug_output(build_id, into).await
+    ) -> anyhow::Result<Option<RestrictedPath>> {
+        self.as_ref().build_id_to_debug_output(build_id).await
     }
 
     async fn fetch_store_path(
         &self,
         store_path: &StorePath,
-        into: &Path,
-    ) -> anyhow::Result<Presence> {
-        self.as_ref().fetch_store_path(store_path, into).await
+    ) -> anyhow::Result<Option<RestrictedPath>> {
+        self.as_ref().fetch_store_path(store_path).await
     }
 
     fn priority(&self) -> Priority {
         self.as_ref().priority()
+    }
+
+    fn spawn_cleanup_task(&self) {
+        self.as_ref().spawn_cleanup_task()
     }
 }
 
@@ -111,7 +116,14 @@ pub type BoxedSubstituter = Box<dyn Substituter + Send + Sync + 'static>;
 /// Query params are ignored
 ///
 /// Returns an error if no implementation can handle this url.
-pub async fn substituter_from_url(url: &Url) -> anyhow::Result<BoxedSubstituter> {
+///
+/// Cache for this substituter will be stored in `cache_path` (directory, must already exist) and
+/// expire after approximately `expiration`.
+pub async fn substituter_from_url(
+    url: &Url,
+    cache_path: PathBuf,
+    expiration: Duration,
+) -> anyhow::Result<BoxedSubstituter> {
     match url.scheme() {
         "file" => {
             let path = Path::new(url.path());
@@ -122,12 +134,16 @@ pub async fn substituter_from_url(url: &Url) -> anyhow::Result<BoxedSubstituter>
                     path.display()
                 )
             })?;
-            Ok(Box::new(FileSubstituter::new(path)))
+            let file_substituter = FileSubstituter::new(path, cache_path, expiration)
+                .await
+                .with_context(|| format!("creating a file substituter for {path:?}"))?;
+            Ok(Box::new(file_substituter))
         }
         "http" | "https" => {
-            let substituter = Box::new(HttpSubstituter::new(url.clone()))
+            let http_substituter = HttpSubstituter::new(url.clone(), cache_path, expiration)
+                .await
                 .with_context(|| format!("creating an http substituter from {url}"))?;
-            Ok(Box::new(substituter))
+            Ok(Box::new(http_substituter))
         }
         "local" => Ok(Box::new(LocalStoreSubstituter)),
         other => {

@@ -120,7 +120,12 @@ fn assert_send<'a, T, U: std::future::Future<Output = T> + Send + 'a>(fut: U) ->
 ///
 /// Does not actually return.
 pub async fn run_server(args: Options) -> anyhow::Result<()> {
-    let substituter = MultiplexingSubstituter::new_from_urls(args.substituter.iter()).await?;
+    let substituter = MultiplexingSubstituter::new_from_urls(
+        args.substituter.iter(),
+        args.cache_dir.as_ref(),
+        args.expiration,
+    )
+    .await?;
     let state = ServerState {
         debuginfod: Arc::new(
             Debuginfod::new(

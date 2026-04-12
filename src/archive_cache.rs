@@ -45,7 +45,7 @@ pub struct ArchiveUnpacker;
 
 impl FetcherCacheKey for SourceArchive {
     fn as_key(&self) -> &str {
-        self.build_id.as_key()
+        &self.build_id
     }
 }
 

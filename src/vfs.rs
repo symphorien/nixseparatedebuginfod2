@@ -33,7 +33,8 @@ pub struct RestrictedPath {
     root: PathBuf,
     /// the absolute untrusted path
     inner: PathBuf,
-    lock: CachedPathLock,
+    /// keep the cached path from being gc-ed. None if there is no risk of gc
+    lock: Option<CachedPathLock>,
 }
 
 impl Debug for RestrictedPath {
@@ -55,7 +56,8 @@ impl Debug for RestrictedPath {
 #[derive(Clone)]
 pub struct ResolvedPath {
     path: PathBuf,
-    lock: CachedPathLock,
+    /// keep the cached path from being gc-ed. None if there is no risk of gc
+    lock: Option<CachedPathLock>,
 }
 
 impl Debug for ResolvedPath {
@@ -175,16 +177,24 @@ const MAX_SYMLINK_DEPTH: u32 = 20;
 impl RestrictedPath {
     /// Creates a `RestrictedPath` with itself as root
     ///
-    /// Fails if the `root` does not exist.
+    /// Fails if the `root` does not exist, or is `/`.
     ///
-    /// If `root` is a symlink, then this symlink will be followed without check.
+    /// Symlinks are followed in the parent of `root` but if `root` itself is a symlink then it
+    /// falls into the symlink restriction logic.
     ///
     /// However, if the resulting path is modified then
     /// symlinks that are introduced will be checked.
-    pub async fn new(root: PathBuf, lock: CachedPathLock) -> anyhow::Result<Self> {
-        let root = tokio::fs::canonicalize(&root)
+    pub async fn new(root: PathBuf, lock: Option<CachedPathLock>) -> anyhow::Result<Self> {
+        let Some(parent) = root.parent() else {
+            anyhow::bail!("RestrictedPath::new(\"/\")")
+        };
+        let Some(filename) = root.file_name() else {
+            anyhow::bail!("RestrictedPath::new(\"/\")")
+        };
+        let root = tokio::fs::canonicalize(parent)
             .await
-            .with_context(|| format!("canonicalize({})", root.display()))?;
+            .with_context(|| format!("canonicalize({parent:?})"))?
+            .join(filename);
         Ok(Self {
             inner: root.clone(),
             root,
@@ -239,24 +249,22 @@ impl RestrictedPath {
                 "failed to resolve {}: more than {MAX_SYMLINK_DEPTH} symlinks",
                 self.inner.display()
             );
-            let relative = to_be_resolved.strip_prefix(current_root).with_context(|| {
-                format!(
-                    "{} escaped out of {}",
-                    self.inner.display(),
-                    current_root.display()
-                )
-            })?;
+            let Some(mut resolved_path) = current_root.parent().map(Path::to_path_buf) else {
+                anyhow::bail!("resolving with root as /")
+            };
+            let relative = to_be_resolved
+                .strip_prefix(&resolved_path)
+                .with_context(|| {
+                    format!(
+                        "{} escaped out of {}",
+                        self.inner.display(),
+                        current_root.display()
+                    )
+                })?;
 
-            // invariant: the path we need is resolved_path.join(remaining_components), and resolved_path contains no symlink
-            let mut resolved_path = current_root.to_path_buf();
             let mut remaining_components = relative.components();
+            // invariant: the path we need is resolved_path.join(remaining_components), and resolved_path contains no symlink
             while let Some(component) = remaining_components.next() {
-                anyhow::ensure!(
-                    resolved_path.starts_with(current_root),
-                    "{:?} escaped out of {current_root:?}",
-                    &self.inner
-                );
-
                 match component {
                     Component::CurDir => continue,
                     Component::ParentDir => {
@@ -269,13 +277,18 @@ impl RestrictedPath {
 
                         // apparently /.. is / so no need to check the return value
                         resolved_path.pop();
-                        continue;
                     }
                     Component::RootDir | Component::Prefix(_) => {
                         anyhow::bail!("unreachable: relative path should not contain {component:?}")
                     }
                     Component::Normal(name) => resolved_path.push(name),
                 }
+                anyhow::ensure!(
+                    resolved_path.starts_with(current_root),
+                    "{:?} escaped out of {current_root:?}",
+                    &self.inner
+                );
+
                 match tokio::fs::read_link(&resolved_path).await {
                     Err(e) => {
                         match e.kind() {
@@ -337,7 +350,7 @@ impl RestrictedPath {
         }
     }
 
-    /// Like `[RestrictedPath::resolve]` except that symlinks tot the store result in an error
+    /// Like `[RestrictedPath::resolve]` except that symlinks to the store result in an error
     pub async fn resolve_inside_root(self) -> anyhow::Result<Option<ResolvedPath>> {
         self.resolve(|path| async move {
             Err(anyhow::anyhow!(
@@ -350,6 +363,8 @@ impl RestrictedPath {
 
 #[cfg(test)]
 mod test {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use tokio::io::AsyncReadExt;
 
     use crate::test_utils::setup_logging;
@@ -385,7 +400,7 @@ mod test {
     #[tokio::test]
     async fn test_resolve_dotdot_no_symlink() {
         let d = make_test_dir(vec!["a/b/c/d", "e"], vec![]);
-        let root = RestrictedPath::new(d.path().to_path_buf(), CachedPathLock::fake())
+        let root = RestrictedPath::new(d.path().to_path_buf(), None)
             .await
             .unwrap();
         let subject = root.join("a/b/c/../../../e");
@@ -396,7 +411,7 @@ mod test {
     #[tokio::test]
     async fn test_resolve_dot_no_symlink() {
         let d = make_test_dir(vec!["a/b/c/d", "e"], vec![]);
-        let root = RestrictedPath::new(d.path().to_path_buf(), CachedPathLock::fake())
+        let root = RestrictedPath::new(d.path().to_path_buf(), None)
             .await
             .unwrap();
         let subject = root.join("a/b/c/./././d");
@@ -407,7 +422,7 @@ mod test {
     #[tokio::test]
     async fn test_resolve_dotdot_file() {
         let d = make_test_dir(vec!["a/b/c/d", "e"], vec![]);
-        let root = RestrictedPath::new(d.path().to_path_buf(), CachedPathLock::fake())
+        let root = RestrictedPath::new(d.path().to_path_buf(), None)
             .await
             .unwrap();
         // cannot use .. when parent is a file
@@ -418,7 +433,7 @@ mod test {
     #[tokio::test]
     async fn test_resolve_dotdot_escape() {
         let d = make_test_dir(vec!["a/b/c/d", "e"], vec![]);
-        let root = RestrictedPath::new(d.path().to_path_buf(), CachedPathLock::fake())
+        let root = RestrictedPath::new(d.path().to_path_buf(), None)
             .await
             .unwrap();
         let subject = root
@@ -431,7 +446,7 @@ mod test {
     #[tokio::test]
     async fn test_resolve_dotdot_after_symlink() {
         let d = make_test_dir(vec!["a/b/c/d", "e"], vec![("link", "a/b")]);
-        let root = RestrictedPath::new(d.path().to_path_buf(), CachedPathLock::fake())
+        let root = RestrictedPath::new(d.path().to_path_buf(), None)
             .await
             .unwrap();
         let subject = root.join("link/../../e");
@@ -445,7 +460,7 @@ mod test {
             vec!["a/b/c/d", "a/b/C"],
             vec![("link", "a/b"), ("a/b/c/link2", "../C")],
         );
-        let root = RestrictedPath::new(d.path().to_path_buf(), CachedPathLock::fake())
+        let root = RestrictedPath::new(d.path().to_path_buf(), None)
             .await
             .unwrap();
         let subject = root.join("link/c/link2");
@@ -456,7 +471,7 @@ mod test {
     #[tokio::test]
     async fn test_resolve_symlink_dotdot_escape() {
         let d = make_test_dir(vec!["a/b/c/d", "e"], vec![("link", "..")]);
-        let root = RestrictedPath::new(d.path().to_path_buf(), CachedPathLock::fake())
+        let root = RestrictedPath::new(d.path().to_path_buf(), None)
             .await
             .unwrap();
         let subject = root
@@ -469,7 +484,7 @@ mod test {
     #[tokio::test]
     async fn test_resolve_symlink_loop() {
         let d = make_test_dir(vec!["e"], vec![("a/link", "../a/link")]);
-        let root = RestrictedPath::new(d.path().to_path_buf(), CachedPathLock::fake())
+        let root = RestrictedPath::new(d.path().to_path_buf(), None)
             .await
             .unwrap();
         let subject = root.join("a/link");
@@ -484,7 +499,7 @@ mod test {
             vec![],
             vec![("link", d2.path().join("escape").to_str().unwrap())],
         );
-        let root = RestrictedPath::new(d.path().to_path_buf(), CachedPathLock::fake())
+        let root = RestrictedPath::new(d.path().to_path_buf(), None)
             .await
             .unwrap();
         let subject = root.join("link");
@@ -495,7 +510,7 @@ mod test {
     async fn test_resolve_use_file_as_dir() {
         setup_logging();
         let d = make_test_dir(vec!["a"], vec![]);
-        let root = RestrictedPath::new(d.path().to_path_buf(), CachedPathLock::fake())
+        let root = RestrictedPath::new(d.path().to_path_buf(), None)
             .await
             .unwrap();
         let subject = root.join("a/b");
@@ -506,7 +521,7 @@ mod test {
     async fn test_resolve_missing_file() {
         setup_logging();
         let d = make_test_dir(vec!["a"], vec![]);
-        let root = RestrictedPath::new(d.path().to_path_buf(), CachedPathLock::fake())
+        let root = RestrictedPath::new(d.path().to_path_buf(), None)
             .await
             .unwrap();
         let subject = root.join("b");
@@ -514,21 +529,105 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_resolve_parent_of_root() {
-        let d = make_test_dir(vec!["a"], vec![]);
-        let root = RestrictedPath::new("/".into(), CachedPathLock::fake())
+    async fn test_resolve_root_has_symlink_parent() {
+        let d = make_test_dir(
+            vec!["parenttarget/root/a"],
+            vec![("parent", "parenttarget")],
+        );
+        let root = RestrictedPath::new(d.path().join("parent/root"), None)
             .await
             .unwrap();
-        // /.. is supposed to be /
-        let subject = root.join("..").join(d.path()).join("a");
+        let subject = root.join("a");
         let resolved = subject.resolve_inside_root().await.unwrap().unwrap();
-        assert_contains(&resolved, "a").await;
+        assert_contains(&resolved, "parenttarget/root/a").await;
+    }
+
+    #[tokio::test]
+    async fn test_resolve_root_is_symlink() {
+        let d = make_test_dir(vec!["parenttarget/a"], vec![("parent", "parenttarget")]);
+        let root = RestrictedPath::new(d.path().join("parent"), None)
+            .await
+            .unwrap();
+        let subject = root.join("a");
+        subject.resolve_inside_root().await.unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn test_resolve_root_is_symlink_to_store_path() {
+        let d = make_test_dir(
+            vec![],
+            vec![(
+                "link",
+                "/nix/store/hawy0gnlpv0j6h8a3szfgxfjvn84890h-sl-5.05/bin",
+            )],
+        );
+        let d2 = make_test_dir(vec!["bin/sl"], vec![]);
+        let d2path = d2.path();
+        let root = RestrictedPath::new(d.path().join("link"), None)
+            .await
+            .unwrap();
+        let resolver = |storepath: StorePath| async move {
+            assert_eq!(
+                storepath.as_ref().as_os_str(),
+                "/nix/store/hawy0gnlpv0j6h8a3szfgxfjvn84890h-sl-5.05/bin/sl"
+            );
+            Ok(Some(
+                RestrictedPath::new(d2path.to_path_buf(), None)
+                    .await
+                    .unwrap(),
+            ))
+        };
+        let resolved = root.join("sl").resolve(resolver).await.unwrap().unwrap();
+        assert_contains(dbg!(&resolved), "bin/sl").await;
+    }
+
+    #[tokio::test]
+    async fn test_resolve_root_is_symlink_to_escaping_link() {
+        let d = make_test_dir(
+            vec![],
+            vec![(
+                "link",
+                "/nix/store/hawy0gnlpv0j6h8a3szfgxfjvn84890h-sl-5.05",
+            )],
+        );
+        let d2 = make_test_dir(vec!["outsideroot/bin/sl"], vec![("root", "outsideroot")]);
+        let d2path = d2.path().join("root");
+        let d2pathref = &d2path;
+        let root = RestrictedPath::new(d.path().join("link"), None)
+            .await
+            .unwrap();
+        let called = AtomicBool::new(false);
+        let called_ref = &called;
+        let resolver = |storepath: StorePath| async move {
+            assert_eq!(
+                storepath.as_ref().as_os_str(),
+                "/nix/store/hawy0gnlpv0j6h8a3szfgxfjvn84890h-sl-5.05/bin/sl"
+            );
+            called_ref.store(true, Ordering::SeqCst);
+            Ok(Some(
+                RestrictedPath::new(d2pathref.to_path_buf(), None)
+                    .await
+                    .unwrap(),
+            ))
+        };
+        dbg!(root.join("bin").join("sl").resolve(resolver).await).unwrap_err();
+        assert!(called.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_root() {
+        // this used to be a test about resolving /.. but now it's forbidden at construction time
+        RestrictedPath::new("/".into(), None).await.unwrap_err();
+        RestrictedPath::new("/..".into(), None).await.unwrap_err();
+        RestrictedPath::new("/././.".into(), None)
+            .await
+            .unwrap_err();
     }
 
     #[tokio::test]
     async fn test_resolve_double_slash() {
         let d = make_test_dir(vec!["a/b/c/d", "e"], vec![]);
-        let root = RestrictedPath::new(d.path().to_path_buf(), CachedPathLock::fake())
+        let root = RestrictedPath::new(d.path().to_path_buf(), None)
             .await
             .unwrap();
         let subject = root.join("a////../e");
@@ -546,7 +645,7 @@ mod test {
                 "/nix/store/hawy0gnlpv0j6h8a3szfgxfjvn84890h-sl-5.05",
             )],
         );
-        let root = RestrictedPath::new(d.path().to_path_buf(), CachedPathLock::fake())
+        let root = RestrictedPath::new(d.path().to_path_buf(), None)
             .await
             .unwrap();
         let subject = root.join("a/link/bin/sl");
@@ -557,7 +656,7 @@ mod test {
                 "/nix/store/hawy0gnlpv0j6h8a3szfgxfjvn84890h-sl-5.05/bin/sl"
             );
             Ok(Some(
-                RestrictedPath::new(d2path.to_path_buf(), CachedPathLock::fake())
+                RestrictedPath::new(d2path.to_path_buf(), None)
                     .await
                     .unwrap(),
             ))
@@ -576,7 +675,7 @@ mod test {
                 "/nix/store/hawy0gnlpv0j6h8a3szfgxfjvn84890h-file.tar.gz",
             )],
         );
-        let root = RestrictedPath::new(d.path().to_path_buf(), CachedPathLock::fake())
+        let root = RestrictedPath::new(d.path().to_path_buf(), None)
             .await
             .unwrap();
         let subject = root.join("a/link");
@@ -588,7 +687,7 @@ mod test {
                 "/nix/store/hawy0gnlpv0j6h8a3szfgxfjvn84890h-file.tar.gz"
             );
             Ok(Some(
-                RestrictedPath::new(d2path.join("file"), CachedPathLock::fake())
+                RestrictedPath::new(d2path.join("file"), None)
                     .await
                     .unwrap(),
             ))
@@ -606,7 +705,7 @@ mod test {
                 "/nix/store/hawy0gnlpv0j6h8a3szfgxfjvn84890h-sl-5.05",
             )],
         );
-        let root = RestrictedPath::new(d.path().to_path_buf(), CachedPathLock::fake())
+        let root = RestrictedPath::new(d.path().to_path_buf(), None)
             .await
             .unwrap();
         let subject = root.join("a/link/bin/sl");
@@ -619,7 +718,7 @@ mod test {
     async fn test_resolve_store_symlink_to_dir_to_escape() {
         let d2 = make_test_dir(vec!["bin/sl"], vec![]);
         let d = make_test_dir(vec![], vec![("a/link", "/nix/store/hawy0gnlpv0j6h8a3szfgxfjvn84890h-sl-5.05/../hawy0gnlpv0j6h8a3szfgxfjvn84890h-sl-5.05")]);
-        let root = RestrictedPath::new(d.path().to_path_buf(), CachedPathLock::fake())
+        let root = RestrictedPath::new(d.path().to_path_buf(), None)
             .await
             .unwrap();
         let subject = root.join("a/link/bin/sl");
@@ -627,7 +726,7 @@ mod test {
         let resolver = |storepath: StorePath| async move {
             assert_eq!(storepath.as_ref().as_os_str(), "/nix/store/hawy0gnlpv0j6h8a3szfgxfjvn84890h-sl-5.05/../hawy0gnlpv0j6h8a3szfgxfjvn84890h-sl-5.05/bin/sl");
             Ok(Some(
-                RestrictedPath::new(d2path.to_path_buf(), CachedPathLock::fake())
+                RestrictedPath::new(d2path.to_path_buf(), None)
                     .await
                     .unwrap(),
             ))

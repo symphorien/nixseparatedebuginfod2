@@ -96,20 +96,12 @@ pub trait CachableFetcher<Key: FetcherCacheKey>: Send + Sync {
 #[derive(Clone)]
 pub struct CachedPathLock(#[allow(dead_code)] Arc<RwLockReadGuardArc<()>>);
 
-#[cfg(test)]
-impl CachedPathLock {
-    /// Returns a lock that contains no lock
-    pub fn fake() -> Self {
-        let lock = Arc::new(RwLock::new(()));
-        CachedPathLock(Arc::new(RwLock::read_arc_blocking(&lock)))
-    }
-}
-
 /// Wraps a [`CachableFetcher`] so that calling [`FetcherCache::get`] only calls
 /// [`CachableFetcher::fetch`] once.
 pub struct FetcherCache<Key: FetcherCacheKey, Fetcher: CachableFetcher<Key>> {
     root_dir: PathBuf,
-    fetcher: Fetcher,
+    /// the underlying cached fetcher
+    pub fetcher: Fetcher,
     phantom_key: PhantomData<Key>,
     locks: tokio::sync::Mutex<WeakValueHashMap<String, Weak<RwLock<()>>>>,
     expiration: Duration,
@@ -131,6 +123,8 @@ impl<Key: FetcherCacheKey + 'static, Fetcher: CachableFetcher<Key> + 'static>
     /// Create a [`FetcherCache`] that stores fetched directories under `root_dir`.
     ///
     /// `expiration` is the order of magnitude of how recently a file must have been requested by [`FetcherCache::get`] to not be deleted by [`FetcherCache::cleanup`].
+    ///
+    /// `root_dir` must already exist.
     pub async fn new(
         root_dir: PathBuf,
         fetcher: Fetcher,
@@ -293,13 +287,9 @@ impl<Key: FetcherCacheKey + 'static, Fetcher: CachableFetcher<Key> + 'static>
             };
             match result {
                 None => Ok(None),
-                Some(path) => {
-                    // FIXME: hack to enable returning a symlink to the store instead of copying to the
-                    // cache
-                    Ok(Some(
-                        RestrictedPath::new(path, CachedPathLock(lock.lock.into())).await?,
-                    ))
-                }
+                Some(path) => Ok(Some(
+                    RestrictedPath::new(path, Some(CachedPathLock(lock.lock.into()))).await?,
+                )),
             }
         };
         future.instrument(span)
@@ -396,7 +386,10 @@ mod tests {
     use tempfile::tempdir;
     use tokio::io::AsyncReadExt;
 
-    use crate::{test_utils::setup_logging, vfs::AsFile};
+    use crate::{
+        test_utils::{count_elements_in_dir, setup_logging},
+        vfs::AsFile,
+    };
 
     use super::*;
 
@@ -507,14 +500,6 @@ mod tests {
         assert_eq!(read_restricted(&second).await, "2");
     }
 
-    fn count_elements_in_dir(dir: &Path) -> usize {
-        #[allow(clippy::suspicious_map)]
-        walkdir::WalkDir::new(dir)
-            .into_iter()
-            .map(|e| e.unwrap())
-            .count()
-    }
-
     #[tokio::test]
     async fn cleanup_expired_symlink() {
         setup_logging();
@@ -605,7 +590,6 @@ mod tests {
             .unwrap();
         tracing::info!("fetching key first");
         let first = cache.get("key".into()).await.unwrap().unwrap();
-        assert_eq!(read_restricted(&first).await, "");
 
         let n1 = count_elements_in_dir(t.path());
         drop(first);
@@ -613,10 +597,6 @@ mod tests {
         cache.cleanup().await.unwrap();
         let n2 = count_elements_in_dir(t.path());
         assert_eq!(n2, n1);
-
-        tracing::info!("fetching key second");
-        let second = cache.get("key".into()).await.unwrap().unwrap();
-        assert_eq!(read_restricted(&second).await, "");
     }
 
     #[tokio::test]

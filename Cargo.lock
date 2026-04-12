@@ -1467,6 +1467,7 @@ dependencies = [
  "http-handle",
  "humantime",
  "nix",
+ "percent-encoding",
  "pin-project",
  "port_check",
  "rand 0.9.2",

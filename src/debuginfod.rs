@@ -10,36 +10,12 @@ use anyhow::Context;
 use crate::{
     archive_cache::{ArchiveUnpacker, SourceArchive},
     build_id::BuildId,
-    cache::{CachableFetcher, FetcherCache, FetcherCacheKey},
+    cache::FetcherCache,
     source_selection::{get_file_for_source, SourceMatch},
     store_path::StorePath,
-    substituter::{BoxedSubstituter, Substituter},
-    utils::Presence,
+    substituter::BoxedSubstituter,
     vfs::{ResolvedPath, ResolvedPathKind, RestrictedPath},
 };
-
-impl FetcherCacheKey for BuildId {
-    fn as_key(&self) -> &str {
-        self.as_ref()
-    }
-}
-impl FetcherCacheKey for StorePath {
-    fn as_key(&self) -> &str {
-        self.hash()
-    }
-}
-
-impl<T: Substituter + Send + Sync + ?Sized + 'static> CachableFetcher<BuildId> for Arc<Box<T>> {
-    async fn fetch<'a>(&'a self, key: &'a BuildId, into: &'a Path) -> anyhow::Result<Presence> {
-        self.build_id_to_debug_output(key, into).await
-    }
-}
-
-impl<T: Substituter + Send + Sync + ?Sized + 'static> CachableFetcher<StorePath> for Arc<Box<T>> {
-    async fn fetch<'a>(&'a self, key: &'a StorePath, into: &'a Path) -> anyhow::Result<Presence> {
-        self.fetch_store_path(key, into).await
-    }
-}
 
 /// The logic behind a debuginfod server: maps build ids to debug symbols, executables, and source
 /// files.
@@ -47,8 +23,7 @@ impl<T: Substituter + Send + Sync + ?Sized + 'static> CachableFetcher<StorePath>
 /// Cloning it returns a reference to the same debuginfod instance.
 #[derive(Clone)]
 pub struct Debuginfod {
-    debuginfo_fetcher: Arc<FetcherCache<BuildId, Arc<BoxedSubstituter>>>,
-    store_fetcher: Arc<FetcherCache<StorePath, Arc<BoxedSubstituter>>>,
+    substituter: Arc<BoxedSubstituter>,
     source_unpacker: Arc<FetcherCache<SourceArchive, ArchiveUnpacker>>,
 }
 
@@ -72,20 +47,11 @@ impl Debuginfod {
         expiration: Duration,
     ) -> anyhow::Result<Self> {
         ensure_dir_exists(&cache_path).await?;
-        let debuginfo_path = cache_path.join("debuginfo");
-        let store_path = cache_path.join("store");
         let source_path = cache_path.join("sources");
-        ensure_dir_exists(&debuginfo_path).await?;
-        ensure_dir_exists(&store_path).await?;
         ensure_dir_exists(&source_path).await?;
         let substituter = Arc::new(substituter);
         Ok(Self {
-            debuginfo_fetcher: Arc::new(
-                FetcherCache::new(debuginfo_path, substituter.clone(), expiration).await?,
-            ),
-            store_fetcher: Arc::new(
-                FetcherCache::new(store_path, substituter.clone(), expiration).await?,
-            ),
+            substituter,
             source_unpacker: Arc::new(
                 FetcherCache::new(source_path, ArchiveUnpacker, expiration).await?,
             ),
@@ -95,8 +61,8 @@ impl Debuginfod {
     /// Spawns tokio tasks to clear downloaded files from the cache when they have not been queried
     /// for too long.
     pub fn spawn_cleanup_task(&self) {
-        self.debuginfo_fetcher.clone().spawn_cleanup_task();
-        self.store_fetcher.clone().spawn_cleanup_task();
+        self.substituter.spawn_cleanup_task();
+        self.source_unpacker.clone().spawn_cleanup_task();
     }
 
     /// Returns the path to ELF object with debug symbols for this build id.
@@ -104,7 +70,7 @@ impl Debuginfod {
         &'debuginfod self,
         build_id: &'key BuildId,
     ) -> anyhow::Result<Option<ResolvedPath>> {
-        match self.debuginfo_fetcher.get(build_id.clone()).await {
+        match self.substituter.build_id_to_debug_output(build_id).await {
             Ok(Some(nar)) => {
                 let debugfile = nar.join(build_id.in_debug_output("debug"));
                 debugfile.resolve_inside_root().await
@@ -121,7 +87,7 @@ impl Debuginfod {
         &'debuginfod self,
         build_id: &'key BuildId,
     ) -> anyhow::Result<Option<ResolvedPath>> {
-        match self.debuginfo_fetcher.get(build_id.clone()).await {
+        match self.substituter.build_id_to_debug_output(build_id).await {
             Ok(Some(nar)) => {
                 let symlink = nar.join(build_id.in_debug_output("executable"));
                 self.resolve_symlinks(symlink).await
@@ -132,7 +98,8 @@ impl Debuginfod {
     }
 
     async fn resolve_symlinks(&self, path: RestrictedPath) -> anyhow::Result<Option<ResolvedPath>> {
-        path.resolve(|s| self.store_fetcher.get(s)).await
+        path.resolve(|s| async move { self.substituter.fetch_store_path(&s).await })
+            .await
     }
 
     /// Return the source file matching `path` that led to the compilation of the executable with
@@ -153,8 +120,8 @@ impl Debuginfod {
             let store_path = StorePath::new(&absolute).context("invalid store path")?;
             let demangled = store_path.demangle();
             match self
-                .store_fetcher
-                .get(demangled.clone())
+                .substituter
+                .fetch_store_path(&demangled)
                 .await
                 .with_context(|| format!("downloading source {}", demangled.as_ref().display()))?
             {
@@ -166,7 +133,7 @@ impl Debuginfod {
             }
         } else {
             // as a fallback, have a look at the source of the buildid
-            let debug_output = match self.debuginfo_fetcher.get(build_id.clone()).await {
+            let debug_output = match self.substituter.build_id_to_debug_output(build_id).await {
                 Ok(Some(nar)) => nar,
                 Ok(None) => return Ok(None),
                 Err(e) => return Err(e),
@@ -226,14 +193,14 @@ mod test {
         build_id::BuildId,
         debuginfod::Debuginfod,
         substituter::file::FileSubstituter,
-        test_utils::{file_sha256, setup_logging},
+        test_utils::{count_elements_in_dir, file_sha256, setup_logging},
     };
 
     #[tokio::test]
     async fn test_debuginfo_nominal() {
         setup_logging();
         let t = tempdir().unwrap();
-        let substituter = FileSubstituter::test_fixture();
+        let substituter = FileSubstituter::test_fixture(t.path()).await;
         let debuginfod = Debuginfod::new(
             t.path().into(),
             Box::new(substituter),
@@ -258,7 +225,7 @@ mod test {
     async fn test_executable_nominal() {
         setup_logging();
         let t = tempdir().unwrap();
-        let substituter = FileSubstituter::test_fixture();
+        let substituter = FileSubstituter::test_fixture(t.path()).await;
         let debuginfod = Debuginfod::new(
             t.path().into(),
             Box::new(substituter),
@@ -279,7 +246,7 @@ mod test {
     async fn test_source_explicit_store_path() {
         setup_logging();
         let t = tempdir().unwrap();
-        let substituter = FileSubstituter::test_fixture();
+        let substituter = FileSubstituter::test_fixture(t.path()).await;
         let debuginfod = Debuginfod::new(
             t.path().into(),
             Box::new(substituter),
@@ -301,7 +268,7 @@ mod test {
     async fn test_source_explicit_mangled_store_path() {
         setup_logging();
         let t = tempdir().unwrap();
-        let substituter = FileSubstituter::test_fixture();
+        let substituter = FileSubstituter::test_fixture(t.path()).await;
         let debuginfod = Debuginfod::new(
             t.path().into(),
             Box::new(substituter),
@@ -323,7 +290,7 @@ mod test {
     async fn test_source_missing_store_path() {
         setup_logging();
         let t = tempdir().unwrap();
-        let substituter = FileSubstituter::test_fixture();
+        let substituter = FileSubstituter::test_fixture(t.path()).await;
         let debuginfod = Debuginfod::new(
             t.path().into(),
             Box::new(substituter),
@@ -342,7 +309,7 @@ mod test {
     async fn test_source_missing_file_in_store_path() {
         setup_logging();
         let t = tempdir().unwrap();
-        let substituter = FileSubstituter::test_fixture();
+        let substituter = FileSubstituter::test_fixture(t.path()).await;
         let debuginfod = Debuginfod::new(
             t.path().into(),
             Box::new(substituter),
@@ -361,7 +328,7 @@ mod test {
     async fn test_source_in_source_dir() {
         setup_logging();
         let t = tempdir().unwrap();
-        let substituter = FileSubstituter::test_fixture();
+        let substituter = FileSubstituter::test_fixture(t.path()).await;
         let debuginfod = Debuginfod::new(
             t.path().into(),
             Box::new(substituter),
@@ -384,7 +351,7 @@ mod test {
     async fn test_source_in_source_dir_patched() {
         setup_logging();
         let t = tempdir().unwrap();
-        let substituter = FileSubstituter::test_fixture();
+        let substituter = FileSubstituter::test_fixture(t.path()).await;
         let debuginfod = Debuginfod::new(
             t.path().into(),
             Box::new(substituter),
@@ -407,7 +374,7 @@ mod test {
     async fn test_source_in_archive() {
         setup_logging();
         let t = tempdir().unwrap();
-        let substituter = FileSubstituter::test_fixture();
+        let substituter = FileSubstituter::test_fixture(t.path()).await;
         let debuginfod = Debuginfod::new(
             t.path().into(),
             Box::new(substituter),
@@ -430,7 +397,7 @@ mod test {
     async fn test_source_in_archive_patched() {
         setup_logging();
         let t = tempdir().unwrap();
-        let substituter = FileSubstituter::test_fixture();
+        let substituter = FileSubstituter::test_fixture(t.path()).await;
         let debuginfod = Debuginfod::new(
             t.path().into(),
             Box::new(substituter),
@@ -447,5 +414,37 @@ mod test {
             file_sha256(dbg!(source)).await,
             "65c819269ed09f81de1d1659efb76008f23bb748c805409f1ad5f782d15836df"
         );
+    }
+
+    #[tokio::test]
+    async fn test_cleanup() {
+        setup_logging();
+        let t = tempdir().unwrap();
+        let expiration = Duration::from_millis(10);
+        let path = crate::test_utils::fixture("file_binary_cache");
+        let substituter = FileSubstituter::new(&path, t.path().to_path_buf(), expiration)
+            .await
+            .unwrap();
+        let debuginfod = Debuginfod::new(t.path().into(), Box::new(substituter), expiration)
+            .await
+            .unwrap();
+        debuginfod.spawn_cleanup_task();
+        let n1;
+        {
+            // /nix/store/34j18r2rpi7js1whmvzm9wliad55rilr-gnumake-4.4.1/bin/make
+            let debuginfo = debuginfod
+                .debuginfo(&BuildId::new("0e20481820d3b92468102b35a5e4a29a8695c1af").unwrap())
+                .await
+                .unwrap()
+                .unwrap();
+            // /nix/store/dlkw5480vfxdi21rybli43ii782czp94-gnumake-4.4.1-debug/lib/debug/make
+            n1 = count_elements_in_dir(t.path());
+            assert_eq!(
+                file_sha256(debuginfo).await,
+                "8f62cc563915e10f870bd7991ad88e535f842a8dd7afcba30c597b3bb6e728ad"
+            );
+        }
+        tokio::time::sleep(3 * expiration).await;
+        assert!(count_elements_in_dir(t.path()) < n1);
     }
 }

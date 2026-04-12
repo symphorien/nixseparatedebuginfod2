@@ -85,6 +85,7 @@ pub async fn remove_recursively_if_exists(path: &Path) -> std::io::Result<()> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         other => other,
     };
+    tracing::trace!(?path, "removing");
     let result = if meta?.is_dir() {
         tokio::fs::remove_dir_all(path).await
     } else {
@@ -132,6 +133,13 @@ async fn test_remove_recursively_if_exists_symlink() {
     remove_recursively_if_exists(&symlink).await.unwrap();
     assert!(file.exists());
     assert!(!symlink.exists());
+}
+
+const CONTROLS_AND_SLASH: percent_encoding::AsciiSet = percent_encoding::CONTROLS.add(b'/');
+
+/// urlencode special characters so that this string is a valid filename
+pub fn percent_encode_to_filename(s: &str) -> String {
+    percent_encoding::utf8_percent_encode(&s, &CONTROLS_AND_SLASH).to_string()
 }
 
 #[pin_project(project = DecompressingReaderInnerProjected)]
