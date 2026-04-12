@@ -139,7 +139,7 @@ const CONTROLS_AND_SLASH: percent_encoding::AsciiSet = percent_encoding::CONTROL
 
 /// urlencode special characters so that this string is a valid filename
 pub fn percent_encode_to_filename(s: &str) -> String {
-    percent_encoding::utf8_percent_encode(&s, &CONTROLS_AND_SLASH).to_string()
+    percent_encoding::utf8_percent_encode(s, &CONTROLS_AND_SLASH).to_string()
 }
 
 #[pin_project(project = DecompressingReaderInnerProjected)]

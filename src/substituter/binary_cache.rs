@@ -1,4 +1,3 @@
-use std::future::Future;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -132,21 +131,19 @@ impl<T: BinaryCache> CachableFetcher<NarRelativeLocation> for T {
     /// `into` must not exist yet, but its parent must be an existing directory.
     ///
     /// In case of error, `into` may contain garbage
-    fn fetch<'a>(
+    async fn fetch<'a>(
         &'a self,
         key: &'a NarRelativeLocation,
         into: &'a Path,
-    ) -> impl Future<Output = anyhow::Result<Presence>> + Send {
-        async move {
-            let Some(nar_stream) = self.stream_location(&key).await? else {
-                tracing::debug!("{} is missing from {:?}", key.location(), &self);
-                return Ok(Presence::NotFound);
-            };
-            let decompressing_nar_reader =
-                DecompressingReader::new(nar_stream, key.location().as_bytes())?;
-            unpack_nar(decompressing_nar_reader, into).await?;
-            Ok(Presence::Found)
-        }
+    ) -> anyhow::Result<Presence> {
+        let Some(nar_stream) = self.stream_location(key).await? else {
+            tracing::debug!("{} is missing from {:?}", key.location(), &self);
+            return Ok(Presence::NotFound);
+        };
+        let decompressing_nar_reader =
+            DecompressingReader::new(nar_stream, key.location().as_bytes())?;
+        unpack_nar(decompressing_nar_reader, into).await?;
+        Ok(Presence::Found)
     }
 }
 
