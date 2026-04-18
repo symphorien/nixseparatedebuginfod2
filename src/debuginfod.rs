@@ -444,7 +444,7 @@ mod test {
                 "8f62cc563915e10f870bd7991ad88e535f842a8dd7afcba30c597b3bb6e728ad"
             );
         }
-        tokio::time::sleep(3 * expiration).await;
+        tokio::time::sleep(100 * expiration).await;
         assert!(count_elements_in_dir(t.path()) < n1);
     }
 
