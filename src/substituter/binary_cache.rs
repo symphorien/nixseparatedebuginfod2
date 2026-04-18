@@ -45,17 +45,79 @@ impl NarRelativeLocation {
     /// binary cache
     ///
     /// `location` may not start nor end with `/`
-    pub fn new(location: &str) -> Self {
-        let key = percent_encode_to_filename(location);
-        Self {
-            location: location.to_owned(),
-            key,
+    ///
+    /// `..` will be resolved logically, which is not 100% correct with symlink semantics, but
+    /// `.`, duplicate `/` and trailing `/` will be stripped away.
+    /// improves caching.
+    pub fn new(location: &str) -> anyhow::Result<Self> {
+        let mut resolved_location = PathBuf::new();
+        for component in Path::new(location).components() {
+            match component {
+                std::path::Component::Prefix(_prefix_component) => {
+                    anyhow::bail!("unexpected prefix in NarRelativeLocation::new({location:?})")
+                }
+                std::path::Component::RootDir => {
+                    anyhow::bail!(
+                        "cannot create NarRelativeLocation from absolute path {location:?}"
+                    )
+                }
+                std::path::Component::CurDir => {}
+                std::path::Component::ParentDir => {
+                    if !resolved_location.pop() {
+                        anyhow::bail!("NarRelativeLocation::new({location:?}): path escapes root");
+                    }
+                }
+                std::path::Component::Normal(os_str) => {
+                    if !os_str.is_empty() {
+                        resolved_location.push(os_str)
+                    }
+                }
+            }
         }
+        let resolved_location = resolved_location
+            .to_str()
+            .with_context(|| format!("invalid utf8 NarRelativeLocation: {location:?}"))?;
+        let key = percent_encode_to_filename(resolved_location);
+        Ok(Self {
+            location: resolved_location.to_owned(),
+            key,
+        })
     }
     /// relative path of the NAR
     pub fn location(&self) -> &str {
         &self.location
     }
+}
+
+#[test]
+fn nar_relative_location_nomimal() {
+    let n = NarRelativeLocation::new("a/b").unwrap();
+    assert_eq!(n.location(), "a/b");
+    assert_eq!(n.as_key(), "a%2Fb");
+}
+
+#[test]
+fn nar_relative_location_percent() {
+    let n = NarRelativeLocation::new("a/b%2F").unwrap();
+    assert_eq!(n.location(), "a/b%2F");
+    assert_eq!(n.as_key(), "a%2Fb%252F");
+}
+
+#[test]
+fn nar_relative_location_absolute() {
+    NarRelativeLocation::new("/a").unwrap_err();
+}
+
+#[test]
+fn nar_relative_location_escape() {
+    NarRelativeLocation::new("../a").unwrap_err();
+}
+
+#[test]
+fn nar_relative_location_normalize() {
+    let n = NarRelativeLocation::new("a/b/.././/c/").unwrap();
+    assert_eq!(n.location(), "a/c");
+    assert_eq!(n.as_key(), "a%2Fc");
 }
 
 /// A substituter with the well-known-structure of a binary cache
@@ -184,8 +246,8 @@ impl<T: BinaryCache + 'static> Substituter for CachedBinaryCache<T> {
         &self,
         build_id: &BuildId,
     ) -> anyhow::Result<Option<RestrictedPath>> {
-        let location1 = NarRelativeLocation::new(&format!("debuginfo/{}", build_id));
-        let location2 = NarRelativeLocation::new(&format!("debuginfo/{}.debug", build_id));
+        let location1 = NarRelativeLocation::new(&format!("debuginfo/{}", build_id))?;
+        let location2 = NarRelativeLocation::new(&format!("debuginfo/{}.debug", build_id))?;
         let maybe_json_stream = match self.inner().stream_location(&location1).await {
             Ok(Some(x)) => Some(x),
             Err(_) | Ok(None) => self.inner().stream_location(&location2).await?,
@@ -201,7 +263,7 @@ impl<T: BinaryCache + 'static> Substituter for CachedBinaryCache<T> {
             serde_json::from_slice(&json_bytes).with_context(|| {
                 format!("unexpected format for {location1:?} or {location2:?} in {self:?}")
             })?;
-        let nar_path = NarRelativeLocation::new(&format!("debuginfo/{}", &redirect.archive));
+        let nar_path = NarRelativeLocation::new(&format!("debuginfo/{}", &redirect.archive))?;
         self.cache.get(nar_path).await
     }
 
@@ -210,7 +272,7 @@ impl<T: BinaryCache + 'static> Substituter for CachedBinaryCache<T> {
         &self,
         store_path: &StorePath,
     ) -> anyhow::Result<Option<RestrictedPath>> {
-        let narinfo_path = NarRelativeLocation::new(&format!("{}.narinfo", store_path.hash()));
+        let narinfo_path = NarRelativeLocation::new(&format!("{}.narinfo", store_path.hash()))?;
         let Some(narinfo_stream) = self.inner().stream_location(&narinfo_path).await? else {
             tracing::debug!("{narinfo_path:?} is missing from {self:?}");
             return Ok(None);
@@ -218,7 +280,7 @@ impl<T: BinaryCache + 'static> Substituter for CachedBinaryCache<T> {
         let nar_path = narinfo_to_nar_location(narinfo_stream)
             .await
             .with_context(|| format!("parsing {narinfo_path:?}"))?;
-        self.cache.get(NarRelativeLocation::new(&nar_path)).await
+        self.cache.get(NarRelativeLocation::new(&nar_path)?).await
     }
 
     fn priority(&self) -> Priority {

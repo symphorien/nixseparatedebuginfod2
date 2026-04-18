@@ -135,11 +135,14 @@ async fn test_remove_recursively_if_exists_symlink() {
     assert!(!symlink.exists());
 }
 
-const CONTROLS_AND_SLASH: percent_encoding::AsciiSet = percent_encoding::CONTROLS.add(b'/');
+const CONTROLS_AND_SLASH_AND_PERCENT: percent_encoding::AsciiSet =
+    percent_encoding::CONTROLS.add(b'/').add(b'%');
 
 /// urlencode special characters so that this string is a valid filename
+///
+/// injective
 pub fn percent_encode_to_filename(s: &str) -> String {
-    percent_encoding::utf8_percent_encode(s, &CONTROLS_AND_SLASH).to_string()
+    percent_encoding::utf8_percent_encode(s, &CONTROLS_AND_SLASH_AND_PERCENT).to_string()
 }
 
 #[pin_project(project = DecompressingReaderInnerProjected)]
