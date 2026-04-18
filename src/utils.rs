@@ -1,7 +1,7 @@
 //! Misc utils
-use std::fmt::Debug;
 use std::path::Path;
 use std::pin::pin;
+use std::{fmt::Debug, time::Duration};
 
 use anyhow::Context;
 use async_compression::tokio::bufread::{XzDecoder, ZstdDecoder};
@@ -9,6 +9,10 @@ use nix::fcntl::AT_FDCWD;
 use nix::sys::time::TimeSpec;
 use pin_project::pin_project;
 use tokio::io::{AsyncBufRead, AsyncRead};
+use tracing::Level;
+
+#[cfg(test)]
+use crate::test_utils::count_elements_in_dir;
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 #[must_use]
@@ -133,6 +137,123 @@ async fn test_remove_recursively_if_exists_symlink() {
     remove_recursively_if_exists(&symlink).await.unwrap();
     assert!(file.exists());
     assert!(!symlink.exists());
+}
+
+/// Removes elements older than `expiration` in this cache directory.
+///
+/// Does not remove the directory itself, which must exist.
+///
+/// This is a way to migrate the cache directory from one layout in a version to a different layout
+/// in later versions.
+#[tracing::instrument(level=Level::DEBUG)]
+pub fn clean_cache_dir(path: &Path, expiration: Duration) -> anyhow::Result<()> {
+    for entry in walkdir::WalkDir::new(path)
+        .min_depth(1)
+        .follow_links(false)
+        .contents_first(true)
+    {
+        let entry = entry?;
+        if entry.file_type().is_dir() {
+            let path = entry.path();
+            if std::fs::read_dir(path)
+                .with_context(|| format!("failed to list cache dir {path:?}"))?
+                .next()
+                .is_none()
+            {
+                // empty dir
+                std::fs::remove_dir(path)
+                    .with_context(|| format!("failed to remove unused cache dir {path:?}"))?;
+            }
+        } else {
+            let meta = entry
+                .metadata()
+                .with_context(|| format!("stat({:?}", entry.path()))?;
+            let mut most_recent_time = meta.accessed();
+            let other_time = meta.modified();
+            // only report errors if neither time could be obtained
+            // keep only the most recent
+            most_recent_time = match (&most_recent_time, &other_time) {
+                (Ok(ref t), Ok(ref t2)) if t > t2 => most_recent_time,
+                (Ok(_), Ok(_)) => other_time,
+                (Err(_), Ok(_)) => other_time,
+                (Ok(_), Err(_)) => most_recent_time,
+                (Err(_), Err(_)) => other_time,
+            };
+            let most_recent_time = most_recent_time
+                .with_context(|| format!("failed to get time of {:?}", entry.path()))?;
+
+            let age = most_recent_time
+                .elapsed()
+                .with_context(|| format!("cannot compute age of {:?}", entry.path()))?;
+            if age > expiration {
+                std::fs::remove_file(entry.path()).with_context(|| {
+                    format!("cannot remove expired cache file {:?}", entry.path())
+                })?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn clean_cache_dir_clean_everything() {
+    let t = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(t.path().join("nixseparatedebuginfod2/b")).unwrap();
+    let path = t.path().join("nixseparatedebuginfod2");
+    assert_eq!(count_elements_in_dir(&path), 2);
+    clean_cache_dir(&path, Duration::from_secs(0)).unwrap();
+    assert_eq!(count_elements_in_dir(&path), 1);
+}
+
+#[test]
+fn clean_cache_dir_clean_broken_symlink() {
+    let t = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(t.path().join("nixseparatedebuginfod2/b")).unwrap();
+    let path = t.path().join("nixseparatedebuginfod2");
+    let symlink = path.join("symlink");
+    std::os::unix::fs::symlink("broken", &symlink).unwrap();
+    assert_eq!(count_elements_in_dir(&path), 3);
+    clean_cache_dir(&path, Duration::from_secs(0)).unwrap();
+    assert_eq!(count_elements_in_dir(&path), 1);
+}
+
+#[test]
+fn clean_cache_dir_nominal() {
+    let t = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(t.path().join("nixseparatedebuginfod2/b")).unwrap();
+    let path = t.path().join("nixseparatedebuginfod2");
+    std::fs::create_dir_all(path.join("a/b")).unwrap();
+    std::fs::create_dir_all(path.join("c/d")).unwrap();
+    std::fs::write(path.join("a/b/old"), "old").unwrap();
+    std::fs::write(path.join("c/d/new"), "new").unwrap();
+    let expiration = Duration::from_hours(48);
+    let pivot = std::time::SystemTime::now() - expiration;
+    let before = pivot - Duration::from_secs(20);
+    let after = pivot + Duration::from_secs(20);
+    let convert = |when: std::time::SystemTime| -> TimeSpec {
+        when.duration_since(std::time::UNIX_EPOCH).unwrap().into()
+    };
+    let before_ts = convert(before);
+    let after_ts = convert(after);
+    nix::sys::stat::utimensat(
+        AT_FDCWD,
+        &path.join("a/b/old"),
+        &before_ts,
+        &before_ts,
+        nix::sys::stat::UtimensatFlags::NoFollowSymlink,
+    )
+    .unwrap();
+    nix::sys::stat::utimensat(
+        AT_FDCWD,
+        &path.join("c/d/new"),
+        &after_ts,
+        &after_ts,
+        nix::sys::stat::UtimensatFlags::NoFollowSymlink,
+    )
+    .unwrap();
+    clean_cache_dir(&path, expiration).unwrap();
+    assert!(!path.join("a").exists());
+    assert!(path.join("c/d/new").exists());
 }
 
 const CONTROLS_AND_SLASH_AND_PERCENT: percent_encoding::AsciiSet =

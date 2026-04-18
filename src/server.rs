@@ -120,23 +120,48 @@ fn assert_send<'a, T, U: std::future::Future<Output = T> + Send + 'a>(fut: U) ->
 ///
 /// Does not actually return.
 pub async fn run_server(args: Options) -> anyhow::Result<()> {
+    // prepare cache
+    tokio::fs::create_dir_all(&args.cache_dir)
+        .await
+        .with_context(|| format!("creating cache dir {:?}", args.cache_dir))?;
+    let cache_dir2 = args.cache_dir.clone();
+    let expiration2 = args.expiration;
+    tokio::task::spawn_blocking(move || {
+        crate::utils::clean_cache_dir(cache_dir2.as_ref(), expiration2)
+    })
+    .await
+    .context("could not spawn cache cleaning")?
+    .with_context(|| format!("failed to cleanup{:?}", &args.cache_dir))?;
+    let substituter_cache_dir = std::path::Path::new(&args.cache_dir).join("substituter");
+    tokio::fs::create_dir_all(&substituter_cache_dir)
+        .await
+        .with_context(|| format!("creating cache dir {substituter_cache_dir:?}"))?;
+    let other_cache_dir = std::path::Path::new(&args.cache_dir).join("other");
+    tokio::fs::create_dir_all(&other_cache_dir)
+        .await
+        .with_context(|| format!("creating cache dir {other_cache_dir:?}"))?;
+
+    // now we build server state
     let substituter = MultiplexingSubstituter::new_from_urls(
         args.substituter.iter(),
-        args.cache_dir.as_ref(),
+        &substituter_cache_dir,
         args.expiration,
     )
     .await?;
     let state = ServerState {
         debuginfod: Arc::new(
             Debuginfod::new(
-                PathBuf::from(&args.cache_dir),
+                PathBuf::from(&other_cache_dir),
                 Box::new(substituter),
                 args.expiration,
             )
             .await?,
         ),
     };
+
     state.debuginfod.spawn_cleanup_task();
+
+    // the server itself
     let app = Router::new()
         .route("/buildid/{buildid}/section/{section}", get(get_section))
         .route("/buildid/{buildid}/source/{*path}", get(get_source))

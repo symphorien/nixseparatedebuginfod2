@@ -70,13 +70,22 @@ pub struct Options {
 }
 
 fn default_cache_directory() -> String {
-    std::env::var("XDG_CACHE_HOME")
-        .map(|x| x + "/" + env!("CARGO_PKG_NAME"))
-        .unwrap_or(std::env::var("CACHE_DIRECTORY").unwrap_or_else(|_| {
+    let parent = std::env::var("XDG_CACHE_HOME").unwrap_or_else(|_| {
+        std::env::var("CACHE_DIRECTORY").unwrap_or_else(|_| {
             std::env::var("HOME")
-                .map(|x| x + "/.cache/" + env!("CARGO_PKG_NAME"))
-                .unwrap_or("/tmp".into())
-        }))
+                .map(|x| x + "/.cache")
+                .unwrap_or_else(|_| "/tmp".into())
+        })
+    });
+
+    // the directory returned by this function may be wiped, so when modifying this code ensure it
+    // cannot return $HOME or something like that
+    const MYNAME: &str = env!("CARGO_PKG_NAME");
+    const {
+        assert!(!MYNAME.is_empty());
+    }
+
+    format!("{parent}/{}", MYNAME)
 }
 
 #[tokio::main]
