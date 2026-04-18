@@ -447,4 +447,46 @@ mod test {
         tokio::time::sleep(3 * expiration).await;
         assert!(count_elements_in_dir(t.path()) < n1);
     }
+
+    #[tokio::test]
+    async fn test_debuginfo_cache_duplication() {
+        // regression test for https://github.com/symphorien/nixseparatedebuginfod2/issues/1
+        setup_logging();
+        let t = tempdir().unwrap();
+        let substituter = FileSubstituter::test_fixture(t.path()).await;
+        let debuginfod = Debuginfod::new(
+            t.path().into(),
+            Box::new(substituter),
+            Duration::from_secs(1000),
+        )
+        .await
+        .unwrap();
+        // /nix/store/pbqih0cmbc4xilscj36m80ardhg6kawp-systemd-minimal-257.6/lib//libsystemd.so.0.40.0
+        let debuginfo = debuginfod
+            .debuginfo(&BuildId::new("2816d674c1ba412088c390dc2f30874134b3c549").unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        // /nix/store/80nn028rq690b6qk8qprkvfbln38crdx-systemd-minimal-257.6-debug/lib/debug/.build-id/28/16d674c1ba412088c390dc2f30874134b3c549.debug
+        assert_eq!(
+            file_sha256(debuginfo).await,
+            "3308aaca67bf383dbdadd4105fc0298a51e11bfc85e52a31cfd1ac57a369c42c"
+        );
+        let n1 = count_elements_in_dir(t.path());
+        // /nix/store/pbqih0cmbc4xilscj36m80ardhg6kawp-systemd-minimal-257.6/lib//libudev.so.1.7.10
+        let debuginfo = debuginfod
+            .debuginfo(&BuildId::new("de29916efc30bce1d9cd571c81944ba5d01c244f").unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        // /nix/store/80nn028rq690b6qk8qprkvfbln38crdx-systemd-minimal-257.6-debug/lib/debug/.build-id/de/29916efc30bce1d9cd571c81944ba5d01c244f.debug
+        assert_eq!(
+            file_sha256(debuginfo).await,
+            "34f6a6e98b66538c74292a3840c6d180298144023bf7aa213f276c7fe71e7373"
+        );
+        let n2 = count_elements_in_dir(t.path());
+        // fetching second debuginfo from the same store path should not cause another copy of the
+        // same storepath to be stored on disk
+        assert_eq!(n1, n2);
+    }
 }
