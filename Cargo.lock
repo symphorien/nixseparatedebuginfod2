@@ -1560,7 +1560,6 @@ dependencies = [
  "pin-project",
  "port_check",
  "quick_cache",
- "rand 0.9.4",
  "reqwest",
  "serde",
  "serde_json",

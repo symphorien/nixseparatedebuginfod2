@@ -10,7 +10,6 @@ use std::process::{Child, Command};
 
 use assert_cmd::assert::OutputAssertExt;
 use assert_cmd::cargo_bin;
-use rand::Rng;
 use tempfile::TempDir;
 
 /// Path to the `tests/fixture` folder of the repo.
@@ -96,7 +95,7 @@ impl Server {
     ///
     /// store is a root filesystem whose subdir `nix/store` contains the store
     fn new(store: &Path) -> Server {
-        let port = rand::rng().random_range(50_000u16..u16::MAX);
+        let port = port_check::free_local_ipv4_port().unwrap();
         let addr = format!("127.0.0.1:{port}");
         let cache = tempfile::tempdir().unwrap();
         std::fs::create_dir(cache.path().join("server")).unwrap();
