@@ -145,7 +145,7 @@ pub async fn substituter_from_url(
                 .with_context(|| format!("creating an http substituter from {url}"))?;
             Ok(Box::new(http_substituter))
         }
-        "local" => Ok(Box::new(LocalStoreSubstituter)),
+        "local" => Ok(Box::new(LocalStoreSubstituter::new())),
         other => {
             anyhow::bail!(
                 "I don't know how to handle this kind of Substituter: {}",

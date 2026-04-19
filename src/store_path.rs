@@ -10,7 +10,7 @@ use std::{
 pub const NIX_STORE: &str = "/nix/store";
 const HASH_LEN: usize = 32;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// A Nix store path (not necessarily its root)
 ///
 /// Currently it hard codes `/nix/store`. Other store locations are not supported.

@@ -1,6 +1,7 @@
 use std::{os::unix::ffi::OsStrExt, path::PathBuf};
 
 use anyhow::Context;
+use quick_cache::sync::Cache;
 
 use crate::{
     build_id::BuildId,
@@ -12,7 +13,9 @@ use super::{Priority, Substituter};
 
 /// serves store paths directly available locally in `/nix/store`
 #[derive(Debug)]
-pub struct LocalStoreSubstituter;
+pub struct LocalStoreSubstituter {
+    cache: Cache<BuildId, PathBuf>,
+}
 
 fn find_buildid_in_store(build_id: &BuildId) -> anyhow::Result<Option<PathBuf>> {
     let expected = build_id.in_debug_output("debug");
@@ -29,21 +32,43 @@ fn find_buildid_in_store(build_id: &BuildId) -> anyhow::Result<Option<PathBuf>> 
     Ok(None)
 }
 
+impl LocalStoreSubstituter {
+    /// A new `LocalStoreSubstituter` for `/nix/store` (hardcoded)
+    pub fn new() -> Self {
+        LocalStoreSubstituter {
+            cache: Cache::new(100),
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl Substituter for LocalStoreSubstituter {
     async fn build_id_to_debug_output(
         &self,
         build_id: &BuildId,
     ) -> anyhow::Result<Option<RestrictedPath>> {
-        let build_id_copy = build_id.clone();
-        match tokio::task::spawn_blocking(move || find_buildid_in_store(&build_id_copy)).await?? {
-            None => Ok(None),
-            Some(path) => Ok(Some(
-                RestrictedPath::new(path.to_path_buf(), None)
-                    .await
-                    .with_context(|| format!("RestrictedPath::new({path:?})"))?,
-            )),
-        }
+        let actual_path = match self.cache.get_value_or_guard_async(build_id).await {
+            Ok(actual_path) => actual_path,
+            Err(placeholder) => {
+                let build_id_copy = build_id.clone();
+                match tokio::task::spawn_blocking(move || find_buildid_in_store(&build_id_copy))
+                    .await??
+                {
+                    None => return Ok(None),
+                    Some(path) => {
+                        if let Err(e) = placeholder.insert(path.clone()) {
+                            tracing::debug!(err=?e, ?path, "weird, could not insert path into cache");
+                        }
+                        path
+                    }
+                }
+            }
+        };
+        Ok(Some(
+            RestrictedPath::new(actual_path.clone(), None)
+                .await
+                .with_context(|| format!("RestrictedPath::new({actual_path:?})"))?,
+        ))
     }
 
     async fn fetch_store_path(

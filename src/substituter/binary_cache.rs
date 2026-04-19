@@ -31,7 +31,7 @@ pub struct DebugInfoRedirectJson {
     pub member: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 /// relative path of a NAR inside the substituter
 pub struct NarRelativeLocation {
     // the relative path
@@ -209,10 +209,48 @@ impl<T: BinaryCache> CachableFetcher<NarRelativeLocation> for T {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+struct SmallNarRelativeLocation {
+    location: String,
+}
+
+impl From<NarRelativeLocation> for SmallNarRelativeLocation {
+    fn from(value: NarRelativeLocation) -> Self {
+        SmallNarRelativeLocation {
+            location: value.location,
+        }
+    }
+}
+
+impl From<SmallNarRelativeLocation> for NarRelativeLocation {
+    fn from(value: SmallNarRelativeLocation) -> Self {
+        let key = percent_encode_to_filename(&value.location);
+        NarRelativeLocation {
+            location: value.location,
+            key,
+        }
+    }
+}
+
+#[test]
+fn small_nar_relative_location_roundtrip() {
+    let a = NarRelativeLocation::new("a/b%").unwrap();
+    let b: SmallNarRelativeLocation = a.clone().into();
+    let c: NarRelativeLocation = b.clone().into();
+    let d: SmallNarRelativeLocation = c.clone().into();
+    assert_eq!(a, c);
+    assert_eq!(b, d);
+    assert_eq!(a.location(), &b.location);
+}
+
+type MemoryCache<K> = quick_cache::sync::Cache<K, SmallNarRelativeLocation>;
+const MEMORY_CACHE_SIZE: usize = 1000;
 /// A substituter implemented on top of a BinaryCache, with caching so that requesting twice the same
 /// store path will not download it twice
 pub struct CachedBinaryCache<T: BinaryCache> {
-    cache: Arc<FetcherCache<NarRelativeLocation, T>>,
+    nar_cache: Arc<FetcherCache<NarRelativeLocation, T>>,
+    debuginfo_lookup_cache: MemoryCache<BuildId>,
+    store_path_lookup_cache: MemoryCache<StorePath>,
 }
 
 impl<T: BinaryCache + 'static> CachedBinaryCache<T> {
@@ -220,14 +258,18 @@ impl<T: BinaryCache + 'static> CachedBinaryCache<T> {
     ///
     /// cache_dir is where downloaded nars are kept for approximately `expiration`
     pub async fn wrap(inner: T, cache_dir: PathBuf, expiration: Duration) -> anyhow::Result<Self> {
-        let cache = FetcherCache::new(cache_dir, inner, expiration).await?;
+        let nar_cache = Arc::new(FetcherCache::new(cache_dir, inner, expiration).await?);
+        let debuginfo_lookup_cache = MemoryCache::new(MEMORY_CACHE_SIZE);
+        let store_path_lookup_cache = MemoryCache::new(MEMORY_CACHE_SIZE);
         Ok(Self {
-            cache: Arc::new(cache),
+            nar_cache,
+            debuginfo_lookup_cache,
+            store_path_lookup_cache,
         })
     }
 
     fn inner(&self) -> &T {
-        &self.cache.fetcher
+        &self.nar_cache.fetcher
     }
 }
 
@@ -246,25 +288,39 @@ impl<T: BinaryCache + 'static> Substituter for CachedBinaryCache<T> {
         &self,
         build_id: &BuildId,
     ) -> anyhow::Result<Option<RestrictedPath>> {
-        let location1 = NarRelativeLocation::new(&format!("debuginfo/{}", build_id))?;
-        let location2 = NarRelativeLocation::new(&format!("debuginfo/{}.debug", build_id))?;
-        let maybe_json_stream = match self.inner().stream_location(&location1).await {
-            Ok(Some(x)) => Some(x),
-            Err(_) | Ok(None) => self.inner().stream_location(&location2).await?,
-        };
-        let Some(json_stream) = maybe_json_stream else {
-            tracing::debug!("{location1:?} and {location2:?} are missing from {self:?}");
-            return Ok(None);
-        };
-        let json_bytes = read_small_stream(json_stream)
+        let nar_location = match self
+            .debuginfo_lookup_cache
+            .get_value_or_guard_async(build_id)
             .await
-            .context("looking for json redirect to debuginfo")?;
-        let redirect: DebugInfoRedirectJson =
-            serde_json::from_slice(&json_bytes).with_context(|| {
-                format!("unexpected format for {location1:?} or {location2:?} in {self:?}")
-            })?;
-        let nar_path = NarRelativeLocation::new(&format!("debuginfo/{}", &redirect.archive))?;
-        self.cache.get(nar_path).await
+        {
+            Ok(small_location) => small_location.into(),
+            Err(placeholder) => {
+                let location1 = NarRelativeLocation::new(&format!("debuginfo/{}", build_id))?;
+                let location2 = NarRelativeLocation::new(&format!("debuginfo/{}.debug", build_id))?;
+                let maybe_json_stream = match self.inner().stream_location(&location1).await {
+                    Ok(Some(x)) => Some(x),
+                    Err(_) | Ok(None) => self.inner().stream_location(&location2).await?,
+                };
+                let Some(json_stream) = maybe_json_stream else {
+                    tracing::debug!("{location1:?} and {location2:?} are missing from {self:?}");
+                    return Ok(None);
+                };
+                let json_bytes = read_small_stream(json_stream)
+                    .await
+                    .context("looking for json redirect to debuginfo")?;
+                let redirect: DebugInfoRedirectJson = serde_json::from_slice(&json_bytes)
+                    .with_context(|| {
+                        format!("unexpected format for {location1:?} or {location2:?} in {self:?}")
+                    })?;
+                let nar_path =
+                    NarRelativeLocation::new(&format!("debuginfo/{}", &redirect.archive))?;
+                if let Err(e) = placeholder.insert(nar_path.clone().into()) {
+                    tracing::trace!(err=?e, nar_path=nar_path.location(), "weird, cannot insert into cache");
+                };
+                nar_path
+            }
+        };
+        self.nar_cache.get(nar_location).await
     }
 
     #[tracing::instrument(level=tracing::Level::DEBUG)]
@@ -272,15 +328,31 @@ impl<T: BinaryCache + 'static> Substituter for CachedBinaryCache<T> {
         &self,
         store_path: &StorePath,
     ) -> anyhow::Result<Option<RestrictedPath>> {
-        let narinfo_path = NarRelativeLocation::new(&format!("{}.narinfo", store_path.hash()))?;
-        let Some(narinfo_stream) = self.inner().stream_location(&narinfo_path).await? else {
-            tracing::debug!("{narinfo_path:?} is missing from {self:?}");
-            return Ok(None);
-        };
-        let nar_path = narinfo_to_nar_location(narinfo_stream)
+        let nar_location = match self
+            .store_path_lookup_cache
+            .get_value_or_guard_async(&store_path.root())
             .await
-            .with_context(|| format!("parsing {narinfo_path:?}"))?;
-        self.cache.get(NarRelativeLocation::new(&nar_path)?).await
+        {
+            Ok(small_location) => small_location.into(),
+            Err(placeholder) => {
+                let narinfo_path =
+                    NarRelativeLocation::new(&format!("{}.narinfo", store_path.hash()))?;
+                let Some(narinfo_stream) = self.inner().stream_location(&narinfo_path).await?
+                else {
+                    tracing::debug!("{narinfo_path:?} is missing from {self:?}");
+                    return Ok(None);
+                };
+                let nar_path = narinfo_to_nar_location(narinfo_stream)
+                    .await
+                    .with_context(|| format!("parsing {narinfo_path:?}"))?;
+                let nar_path = NarRelativeLocation::new(&nar_path)?;
+                if let Err(e) = placeholder.insert(nar_path.clone().into()) {
+                    tracing::trace!(err=?e, nar_path=nar_path.location(), "weird, cannot insert into cache");
+                };
+                nar_path
+            }
+        };
+        self.nar_cache.get(nar_location).await
     }
 
     fn priority(&self) -> Priority {
@@ -288,6 +360,6 @@ impl<T: BinaryCache + 'static> Substituter for CachedBinaryCache<T> {
     }
 
     fn spawn_cleanup_task(&self) {
-        self.cache.clone().spawn_cleanup_task()
+        self.nar_cache.clone().spawn_cleanup_task()
     }
 }

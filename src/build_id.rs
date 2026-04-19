@@ -10,7 +10,7 @@ use std::{fmt::Display, ops::Deref};
 /// file -L /bin/sh
 /// /bin/sh: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /nix/store/maxa3xhmxggrc5v2vc0c3pjb79hjlkp9-glibc-2.40-66/lib/ld-linux-x86-64.so.2, BuildID[sha1]=094b9da7911246c32c8962fe4573d52165304991, for GNU/Linux 3.10.0, not stripped
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BuildId(String);
 
 impl BuildId {
