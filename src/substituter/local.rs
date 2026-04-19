@@ -32,6 +32,12 @@ fn find_buildid_in_store(build_id: &BuildId) -> anyhow::Result<Option<PathBuf>> 
     Ok(None)
 }
 
+impl Default for LocalStoreSubstituter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LocalStoreSubstituter {
     /// A new `LocalStoreSubstituter` for `/nix/store` (hardcoded)
     pub fn new() -> Self {
