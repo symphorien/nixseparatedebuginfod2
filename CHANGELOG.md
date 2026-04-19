@@ -2,7 +2,8 @@ v2.0.0:
 
 - breaking change: omitting `--listen-address` now means that systemd socket activation should be used.
 - breaking change: when no substituter is specified, refuse to run instead of running a server that always returns 404.
-- add support for being a Type=notify systemd service
+- add support for being a Type=notify systemd service. Disable by disabling the `systemd` feature at compilation time.
+- fix caching logic. It used to be the case that querying debuginfo for two libraries in the same derivation would fetch the corresponding debug output twice.
 
 v1.0.1:
 - fix flaky test
