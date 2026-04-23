@@ -81,6 +81,9 @@ pub trait Substituter: std::fmt::Debug {
     ///
     /// May leak resources, as the trait does not provide a method to stop them.
     fn spawn_cleanup_task(&self);
+
+    /// Attempt to free as much disk space from the cache as possible
+    async fn shrink_disk_cache(&self) -> anyhow::Result<()>;
 }
 
 #[async_trait::async_trait]
@@ -105,6 +108,10 @@ impl<S: Substituter + Send + Sync> Substituter for Arc<S> {
 
     fn spawn_cleanup_task(&self) {
         self.as_ref().spawn_cleanup_task()
+    }
+
+    async fn shrink_disk_cache(&self) -> anyhow::Result<()> {
+        self.as_ref().shrink_disk_cache().await
     }
 }
 

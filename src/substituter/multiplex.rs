@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use anyhow::Context;
+use futures::StreamExt as _;
 use reqwest::Url;
 use tracing::Instrument;
 
@@ -88,6 +89,22 @@ impl Substituter for MultiplexingSubstituter {
         for substituter in self.substituters.iter() {
             substituter.spawn_cleanup_task()
         }
+    }
+
+    async fn shrink_disk_cache(&self) -> anyhow::Result<()> {
+        // run it on all of the substituters even if an error happens
+        let results: Vec<anyhow::Result<()>> = futures::stream::iter(self.substituters.iter())
+            .then(async |s| {
+                s.shrink_disk_cache()
+                    .await
+                    .with_context(|| format!("shrinking disk cache of {s:?}"))
+            })
+            .collect()
+            .await;
+        results
+            .into_iter()
+            .find(anyhow::Result::is_err)
+            .unwrap_or(Ok(()))
     }
 }
 
@@ -206,6 +223,10 @@ mod tests {
         }
 
         fn spawn_cleanup_task(&self) {}
+
+        async fn shrink_disk_cache(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
     }
 
     #[tokio::test]

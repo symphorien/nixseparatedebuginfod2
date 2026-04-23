@@ -1,11 +1,13 @@
 //! Logic to find debuginfo in a substituter
 use std::{
+    future::Future,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
 
 use anyhow::Context;
+use tracing::Level;
 
 use crate::{
     archive_cache::{ArchiveUnpacker, SourceArchive},
@@ -65,8 +67,68 @@ impl Debuginfod {
         self.source_unpacker.clone().spawn_cleanup_task();
     }
 
+    /// Reduce cache disk space usage as much as possible
+    #[tracing::instrument(level=Level::DEBUG, skip_all)]
+    pub async fn shrink_disk_cache(&self) -> anyhow::Result<()> {
+        match (
+            self.substituter.shrink_disk_cache().await,
+            self.source_unpacker.shrink_cache().await,
+        ) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(e), _) => Err(e),
+            (_, Err(e)) => Err(e),
+        }
+    }
+
+    async fn retry_on_full_disk<
+        'arg,
+        'debuginfod: 'arg,
+        Arg,
+        Res,
+        Fut: Future<Output = anyhow::Result<Res>> + Send,
+        F: Fn(&'debuginfod Self, &'arg Arg) -> Fut,
+    >(
+        &'debuginfod self,
+        f: F,
+        arg: &'arg Arg,
+    ) -> anyhow::Result<Res> {
+        match f(self, arg).await {
+            Ok(x) => Ok(x),
+            Err(e) => {
+                let should_retry = e.chain().any(|source| {
+                    if let Some(ioerror) = source.downcast_ref::<std::io::Error>() {
+                        matches!(
+                            ioerror.kind(),
+                            std::io::ErrorKind::StorageFull | std::io::ErrorKind::QuotaExceeded
+                        )
+                    } else {
+                        false
+                    }
+                });
+                if should_retry {
+                    tracing::warn!("disk is full or disk quota exceeded: shrinking cache");
+                    if let Err(e) = self.shrink_disk_cache().await {
+                        tracing::warn!(err=?e, "failed to shrink_disk_cache");
+                    }
+                    tracing::debug!("retry on full disk error");
+                    f(self, arg).await
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
     /// Returns the path to ELF object with debug symbols for this build id.
     pub async fn debuginfo<'key, 'debuginfod: 'key>(
+        &'debuginfod self,
+        build_id: &'key BuildId,
+    ) -> anyhow::Result<Option<ResolvedPath>> {
+        self.retry_on_full_disk(Self::debuginfo_noretry, build_id)
+            .await
+    }
+    /// Returns the path to ELF object with debug symbols for this build id.
+    async fn debuginfo_noretry<'key, 'debuginfod: 'key>(
         &'debuginfod self,
         build_id: &'key BuildId,
     ) -> anyhow::Result<Option<ResolvedPath>> {
@@ -84,6 +146,17 @@ impl Debuginfod {
     ///
     /// It is called executable, but it could also be a share object.
     pub async fn executable<'key, 'debuginfod: 'key>(
+        &'debuginfod self,
+        build_id: &'key BuildId,
+    ) -> anyhow::Result<Option<ResolvedPath>> {
+        self.retry_on_full_disk(Self::executable_noretry, build_id)
+            .await
+    }
+
+    /// Returns the path to the ELF object with this build id.
+    ///
+    /// It is called executable, but it could also be a share object.
+    async fn executable_noretry<'key, 'debuginfod: 'key>(
         &'debuginfod self,
         build_id: &'key BuildId,
     ) -> anyhow::Result<Option<ResolvedPath>> {
@@ -110,6 +183,18 @@ impl Debuginfod {
         &self,
         build_id: &BuildId,
         path: &str,
+    ) -> anyhow::Result<Option<ResolvedPath>> {
+        self.retry_on_full_disk(Self::source_noretry, &(build_id, path))
+            .await
+    }
+
+    /// Return the source file matching `path` that led to the compilation of the executable with
+    /// the specified build id.
+    ///
+    /// Matching `path` to actual source file is somewhat fuzzy.
+    async fn source_noretry(
+        &self,
+        &(build_id, path): &(&BuildId, &str),
     ) -> anyhow::Result<Option<ResolvedPath>> {
         // when gdb attempts to show the source of a function that comes
         // from a header in another library, the request is store path made

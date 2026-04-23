@@ -294,9 +294,20 @@ impl<Key: FetcherCacheKey + 'static, Fetcher: CachableFetcher<Key> + 'static>
         };
         future.instrument(span)
     }
+    /// Drop all currently unused cache entries
+    pub async fn shrink_cache(&self) -> anyhow::Result<()> {
+        self._cleanup(Duration::ZERO).await
+    }
     /// Removes cache entry that have not been used for some time.
     #[instrument(level = Level::TRACE, skip_all)]
     async fn cleanup(&self) -> anyhow::Result<()> {
+        self._cleanup(self.expiration).await
+    }
+    /// Removes cache entry that have not been used for some time.
+    ///
+    /// uses `expiration` instead of `self.expiration`
+    #[instrument(level = Level::TRACE, skip(self))]
+    async fn _cleanup(&self, expiration: Duration) -> anyhow::Result<()> {
         let dir = self.root_dir.join(CACHE);
         let mut dirfd = tokio::fs::read_dir(&dir)
             .await
@@ -340,11 +351,7 @@ impl<Key: FetcherCacheKey + 'static, Fetcher: CachableFetcher<Key> + 'static>
                 }
                 Ok(m) => {
                     let mtime = m.modified().context("mtime not supported on this os")?;
-                    if mtime
-                        .elapsed()
-                        .map(|x| x > self.expiration * 2)
-                        .unwrap_or(false)
-                    {
+                    if mtime.elapsed().map(|x| x > expiration * 2).unwrap_or(false) {
                         tracing::debug!("removing expired cache entry {}", entry_path.display());
                         if let Err(e) = remove_recursively_if_exists(&entry_path).await {
                             tracing::warn!(

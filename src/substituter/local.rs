@@ -99,4 +99,9 @@ impl Substituter for LocalStoreSubstituter {
 
     // nothing to do
     fn spawn_cleanup_task(&self) {}
+
+    // nothing to do
+    async fn shrink_disk_cache(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
 }

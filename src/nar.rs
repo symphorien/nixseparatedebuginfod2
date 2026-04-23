@@ -1,11 +1,10 @@
 //! utilities about NAR files (nix archives)
 use anyhow::Context;
 use futures::StreamExt;
-use std::fmt::Debug;
+use nix_nar::Decoder;
 use std::path::Path;
 use std::pin::pin;
-use std::process::Stdio;
-use tokio::io::{AsyncBufRead, AsyncRead, AsyncWriteExt};
+use tokio::io::{AsyncBufRead, AsyncRead};
 use tokio_util::codec::{FramedRead, LinesCodec};
 
 /// Unpacks the nar passed in argument to the specified path.
@@ -13,44 +12,26 @@ use tokio_util::codec::{FramedRead, LinesCodec};
 /// The path must not exist yet, but its parent must be an existing directory.
 ///
 /// In case of error no guarantee is given that destination is clean.
-///
-/// Currently not a native implementation, actually shells out to `nix-store --restore`.
-pub async fn unpack_nar<T: AsyncRead + Debug>(nar: T, destination: &Path) -> anyhow::Result<()> {
-    let mut command = tokio::process::Command::new("nix-store");
-    command.arg("--restore");
-    command.arg(destination);
-    command.stdin(Stdio::piped());
-    command.kill_on_drop(true);
-    tracing::trace!(cmd=?command, "running nix-store --restore");
-    let mut process = command
-        .spawn()
-        .with_context(|| format!("failed to spawn {:?}", &command))?;
-    let Some(mut stdin) = process.stdin.take() else {
-        anyhow::bail!("running nix-store --restore without stdin");
-    };
-    let mut input_reader = pin!(nar);
-    let result = tokio::io::copy(&mut input_reader, &mut stdin).await;
-    let result2 = stdin.flush().await;
-    match result.and(result2) {
-        Ok(()) => {
-            let status = process
-                .wait()
-                .await
-                .context("waiting for nix-store --restore")?;
-            anyhow::ensure!(status.success(), "nix-store --restore failed");
-            Ok(())
-        }
-        Err(e) => {
-            process
-                .kill()
-                .await
-                .with_context(|| format!("killing nix-store --restore because of {e:#}"))?;
-            Err(e).context(format!(
-                "piping {:?} into nix-store --restore",
-                &input_reader
-            ))
-        }
-    }
+pub async fn unpack_nar<'a, T: AsyncRead + Send + std::fmt::Debug + 'a>(
+    nar: T,
+    destination: &'a Path,
+) -> anyhow::Result<()> {
+    let nar_name = format!("{nar:?}");
+    let mut async_reader = pin!(nar);
+    let (static_async_reader, mut static_async_writer) = tokio::io::simplex(1_000_000);
+    let sync_reader = tokio_util::io::SyncIoBridge::new(static_async_reader);
+    let destination2 = destination.to_path_buf();
+    let handle = tokio::task::spawn_blocking(move || {
+        let decoder = Decoder::new(sync_reader)?;
+        decoder.unpack(destination2)
+    });
+    let result = tokio::io::copy(&mut async_reader, &mut static_async_writer).await;
+    handle
+        .await
+        .context("failed to join handle")?
+        .with_context(|| format!("failed to unpack nar {nar_name}"))?;
+    result.with_context(|| format!("copying data to unpacker of {nar_name}"))?;
+    Ok(())
 }
 
 const NAR_URL_KEY: &str = "URL: ";

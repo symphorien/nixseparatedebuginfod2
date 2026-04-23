@@ -362,4 +362,8 @@ impl<T: BinaryCache + 'static> Substituter for CachedBinaryCache<T> {
     fn spawn_cleanup_task(&self) {
         self.nar_cache.clone().spawn_cleanup_task()
     }
+
+    async fn shrink_disk_cache(&self) -> anyhow::Result<()> {
+        self.nar_cache.shrink_cache().await
+    }
 }
