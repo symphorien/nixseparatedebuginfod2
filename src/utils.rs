@@ -1,6 +1,5 @@
 //! Misc utils
 use std::path::Path;
-use std::pin::pin;
 use std::{fmt::Debug, time::Duration};
 
 use anyhow::Context;
