@@ -2,8 +2,8 @@
 use anyhow::Context;
 use futures::StreamExt;
 use nix_nar::Decoder;
-use std::path::Path;
 use std::pin::pin;
+use std::{path::Path, time::Duration};
 use tokio::io::{AsyncBufRead, AsyncRead};
 use tokio_util::codec::{FramedRead, LinesCodec};
 
@@ -21,16 +21,42 @@ pub async fn unpack_nar<'a, T: AsyncRead + Send + std::fmt::Debug + 'a>(
     let (static_async_reader, mut static_async_writer) = tokio::io::simplex(1_000_000);
     let sync_reader = tokio_util::io::SyncIoBridge::new(static_async_reader);
     let destination2 = destination.to_path_buf();
-    let handle = tokio::task::spawn_blocking(move || {
+    let unpacker = tokio::task::spawn_blocking(move || {
         let decoder = Decoder::new(sync_reader)?;
         decoder.unpack(destination2)
     });
-    let result = tokio::io::copy(&mut async_reader, &mut static_async_writer).await;
-    handle
-        .await
+    let mut unpacker = pin!(unpacker);
+    let mut feeder = pin!(tokio::io::copy(&mut async_reader, &mut static_async_writer));
+    let unpacker_result = tokio::select! {
+        unpacker_result = &mut unpacker => {
+            match unpacker_result {
+                Ok(Ok(())) => {
+                    // feeder should already have finished
+                    tokio::time::timeout(Duration::from_secs(1), feeder).await
+                        .with_context(|| format!("nar unpacking of {nar_name} finished without reading all nar"))?
+                        .with_context(|| format!("failed to feed successful nar unpacking of {nar_name}"))?;
+                    Ok(Ok(()))
+                },
+                // intentionnally don't wait for the feeder as the unpacker will never read the
+                // rest of the nar if it failed halfway there
+                error => error,
+            }
+        },
+        feeder_result = &mut feeder => {
+            match feeder_result {
+                Ok(_) => {
+                    unpacker.await
+                },
+                Err(e) => {
+                    // we stop polling the nar unpacker but we can't stop it anyway
+                    return Err(e).context("failed to feed nar unpacker")
+                }
+            }
+        },
+    };
+    unpacker_result
         .context("failed to join handle")?
         .with_context(|| format!("failed to unpack nar {nar_name}"))?;
-    result.with_context(|| format!("copying data to unpacker of {nar_name}"))?;
     Ok(())
 }
 

@@ -1,3 +1,7 @@
+master:
+
+- fix a deadlock when unpacking nar fails in the middle of a large nar
+
 v2.0.0:
 
 - breaking change: omitting `--listen-address` now means that systemd socket activation should be used.
