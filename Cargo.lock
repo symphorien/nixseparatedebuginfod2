@@ -1555,7 +1555,6 @@ dependencies = [
  "futures",
  "hmac-sha256",
  "http",
- "http-body-util",
  "http-handle",
  "humantime",
  "nix",
