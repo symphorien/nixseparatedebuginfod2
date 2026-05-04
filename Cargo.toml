@@ -40,7 +40,7 @@ nix-nar = "0.4.0"
 [dev-dependencies]
 assert_cmd = "2.0.17"
 hmac-sha256 = "1"
-http-handle = "0.0.4"
+http-handle = "0.0.5"
 port_check = "0.3.0"
 reqwest = { version = "0.13.2", features = ["blocking"] }
 tempfile = "3"

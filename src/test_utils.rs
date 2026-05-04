@@ -98,15 +98,19 @@ pub static HTTP_BINARY_CACHE: LazyLock<Url> = LazyLock::new(start_http_binary_ca
 
 fn start_http_binary_cache() -> Url {
     let dir = fixture("file_binary_cache");
-    let port = port_check::free_local_ipv4_port().unwrap();
-    let server =
-        http_handle::server::Server::new(&format!("127.0.0.1:{port}"), dir.to_str().unwrap());
-    std::thread::spawn(move || server.start().unwrap());
-    while !port_check::is_port_reachable_with_timeout(
-        ("127.0.0.1", port),
-        std::time::Duration::from_millis(300),
-    ) {
+    let (addr_send, addr_recv) = std::sync::mpsc::channel();
+    let server = http_handle::server::Server::new("127.0.0.1:0", dir.to_str().unwrap());
+    std::thread::spawn(move || {
+        server
+            .start_with_shutdown_signal_and_ready(Default::default(), |addr| {
+                addr_send.send(addr).unwrap()
+            })
+            .unwrap()
+    });
+    let addr: String = addr_recv.recv().unwrap();
+    while !port_check::is_port_reachable_with_timeout(&addr, std::time::Duration::from_millis(300))
+    {
         std::thread::sleep(std::time::Duration::from_millis(100))
     }
-    Url::parse(&format!("http://127.0.0.1:{port}")).unwrap()
+    Url::parse(&format!("http://{addr}")).unwrap()
 }
