@@ -45,7 +45,7 @@ reqwest = { version = "0.13.2", features = ["blocking"] }
 tempfile = "3"
 nix = { version = "0.31.2", features = ["signal", "process"] }
 command-fds = "0.3"
-shlex = "1.3.0"
+shlex = "2.0.0"
 
 [features]
 default = [ "systemd" ]
