@@ -1,6 +1,7 @@
-master:
+v2.0.1:
 
 - fix a deadlock when unpacking nar fails in the middle of a large nar
+- link dynamically against openssl instead of vendoring aws-lc
 
 v2.0.0:
 
