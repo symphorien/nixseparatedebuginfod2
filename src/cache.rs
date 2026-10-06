@@ -7,7 +7,10 @@ use std::{
     future::Future,
     marker::PhantomData,
     path::{Path, PathBuf},
-    sync::{Arc, Weak},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Weak,
+    },
     time::Duration,
 };
 
@@ -24,9 +27,18 @@ use crate::{
 /// Fetchers are called to write in a directory there.
 ///
 /// Only if they complete successfully the output is moved to [`CACHE`]
+///
+/// Several servers may share a cache directory, and their locks are their own, so every fetch
+/// writes to a directory of its own here, and an entry being removed is moved here first: a
+/// process killed meanwhile leaves its half-written or half-removed directory here, where no
+/// lookup finds it, rather than an incomplete entry in [`CACHE`].
 const PARTIAL: &str = "partial";
 /// Directory where finished outputs are stored.
 const CACHE: &str = "cache";
+
+/// Numbers the directories this process makes in [`PARTIAL`]; with the process id, no other
+/// process sharing the cache directory makes the same.
+static PARTIAL_NUMBER: AtomicU64 = AtomicU64::new(0);
 
 /// An argument to a fetcher that can be used with [`FetcherCache`]
 pub trait FetcherCacheKey: Debug + Send + Sync {
@@ -230,26 +242,50 @@ impl<Key: FetcherCacheKey + 'static, Fetcher: CachableFetcher<Key> + 'static>
             }
         }
     }
+    /// A path in [`PARTIAL`] for `name` that no other fetch or removal uses, in this process or
+    /// another sharing the cache directory.
+    fn partial_path(&self, name: &str) -> PathBuf {
+        let number = PARTIAL_NUMBER.fetch_add(1, Ordering::Relaxed);
+        self.root_dir
+            .join(PARTIAL)
+            .join(format!("{name}.{}.{number}", std::process::id()))
+    }
+
+    /// Removes the cache entry at `entry_path`, named `name`, by moving it to [`PARTIAL`] first,
+    /// so that it is gone from [`CACHE`] at once even if this process is killed while the files
+    /// are deleted.
+    async fn remove_entry(&self, entry_path: &Path, name: &str) -> std::io::Result<()> {
+        let removed = self.partial_path(name);
+        match tokio::fs::rename(entry_path, &removed).await {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            other => other?,
+        }
+        remove_recursively_if_exists(&removed).await
+    }
+
     /// when the corresponding directory is not in cache, put it there
     #[instrument(level = Level::TRACE, skip_all, fields(key=key.key.as_key()))]
     async fn fetch<'key, 'cache: 'key>(
         &'cache self,
         key: &'key WriteLockedCacheEntry<Key>,
     ) -> anyhow::Result<Option<PathBuf>> {
-        let partial_dir = self.root_dir.join(PARTIAL).join(key.key.as_key());
-        // we always clean after us, unless the future stops being polled
-        remove_recursively_if_exists(&partial_dir).await?;
+        let partial_dir = self.partial_path(key.key.as_key());
         let result = match self.fetcher.fetch(&key.key, &partial_dir).await {
-            Ok(Presence::Found) => tokio::fs::rename(&partial_dir, &key.target)
-                .await
-                .with_context(|| {
+            Ok(Presence::Found) => match tokio::fs::rename(&partial_dir, &key.target).await {
+                Ok(()) => Ok(Some(key.target.clone())),
+                // Another server sharing the cache directory fetched the same key and put it
+                // there first; its entry is whole, as ours is.
+                Err(_) if tokio::fs::symlink_metadata(&key.target).await.is_ok() => {
+                    Ok(Some(key.target.clone()))
+                }
+                Err(e) => Err(e).with_context(|| {
                     format!(
                         "renaming {} to {}",
                         partial_dir.display(),
                         key.target.display()
                     )
-                })
-                .map(|()| Some(key.target.clone())),
+                }),
+            },
             Ok(Presence::NotFound) => Ok(None),
             Err(e) => Err(e),
         };
@@ -353,7 +389,7 @@ impl<Key: FetcherCacheKey + 'static, Fetcher: CachableFetcher<Key> + 'static>
                     let mtime = m.modified().context("mtime not supported on this os")?;
                     if mtime.elapsed().map(|x| x > expiration * 2).unwrap_or(false) {
                         tracing::debug!("removing expired cache entry {}", entry_path.display());
-                        if let Err(e) = remove_recursively_if_exists(&entry_path).await {
+                        if let Err(e) = self.remove_entry(&entry_path, entry_name).await {
                             tracing::warn!(
                                 "failed to remove expired cache {}: {e}",
                                 entry_path.display()
@@ -370,7 +406,37 @@ impl<Key: FetcherCacheKey + 'static, Fetcher: CachableFetcher<Key> + 'static>
             // release write lock
             drop(write_lock);
         }
+        self.sweep_partial().await;
         Ok(())
+    }
+
+    /// Removes what processes killed while fetching or removing left in [`PARTIAL`]. Another
+    /// process may be writing there, so only a directory as old as an expired entry goes, even
+    /// when the cache is being shrunk.
+    async fn sweep_partial(&self) {
+        let dir = self.root_dir.join(PARTIAL);
+        let mut dirfd = match tokio::fs::read_dir(&dir).await {
+            Ok(dirfd) => dirfd,
+            Err(e) => {
+                tracing::warn!("cannot sweep {}: {e}", dir.display());
+                return;
+            }
+        };
+        while let Ok(Some(entry)) = dirfd.next_entry().await {
+            let Ok(mtime) = entry.metadata().await.and_then(|m| m.modified()) else {
+                continue;
+            };
+            if !mtime
+                .elapsed()
+                .map(|x| x > self.expiration * 2)
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            if let Err(e) = remove_recursively_if_exists(&entry.path()).await {
+                tracing::warn!("failed to remove {}: {e}", entry.path().display());
+            }
+        }
     }
 
     /// Spawns a task that periodically removes unused cached paths
@@ -449,6 +515,60 @@ mod tests {
                 Ok(Presence::Found)
             }
         }
+    }
+
+    /// How many files [`UnpackingFetcher`] writes, and how long it waits
+    /// before the first and between each.
+    const UNPACKED_FILES: usize = 50;
+    const DOWNLOAD: Duration = Duration::from_millis(100);
+    const PER_FILE: Duration = Duration::from_millis(4);
+
+    /// Fetches a directory the way the source fetcher unpacks an archive:
+    /// a download first, then one file at a time, making the directory
+    /// again if it went.
+    struct UnpackingFetcher;
+    impl CachableFetcher<String> for UnpackingFetcher {
+        fn fetch<'a>(
+            &'a self,
+            _key: &'a String,
+            into: &'a Path,
+        ) -> impl Future<Output = anyhow::Result<Presence>> + Send {
+            async move {
+                tokio::time::sleep(DOWNLOAD).await;
+                for i in 0..UNPACKED_FILES {
+                    tokio::fs::create_dir_all(into).await?;
+                    tokio::fs::write(into.join(i.to_string()), "x").await?;
+                    tokio::time::sleep(PER_FILE).await;
+                }
+                Ok(Presence::Found)
+            }
+        }
+    }
+
+    /// Two caches on one directory, as two servers given the same
+    /// --cache-dir, fetch the same key, the second while the first is
+    /// halfway through unpacking. Neither may take the other's files away:
+    /// the entry that ends up in the cache has every file, and both get it.
+    #[tokio::test]
+    async fn two_caches_on_one_directory_keep_an_entry_whole() {
+        let t = tempdir().unwrap();
+        let expiration = Duration::from_secs(1000);
+        let first = FetcherCache::new(t.path().into(), UnpackingFetcher, expiration)
+            .await
+            .unwrap();
+        let second = FetcherCache::new(t.path().into(), UnpackingFetcher, expiration)
+            .await
+            .unwrap();
+        let halfway = DOWNLOAD + PER_FILE * (UNPACKED_FILES as u32 / 2);
+        let (a, b) = tokio::join!(first.get("key".into()), async {
+            tokio::time::sleep(halfway).await;
+            second.get("key".into()).await
+        });
+        a.unwrap().unwrap();
+        b.unwrap().unwrap();
+        let files_in = |dir: PathBuf| std::fs::read_dir(dir).unwrap().count();
+        assert_eq!(files_in(t.path().join(CACHE).join("key")), UNPACKED_FILES);
+        assert_eq!(files_in(t.path().join(PARTIAL)), 0);
     }
 
     async fn read_restricted(r: &RestrictedPath) -> String {
