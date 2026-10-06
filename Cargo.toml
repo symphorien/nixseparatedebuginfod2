@@ -33,7 +33,7 @@ compress-tools = { version = "0.16.1", features = ["tokio_support"] }
 nix = { version = "0.31.2", features = ["fs"] }
 systemd = { version = "0.10.1", default-features = false, optional = true }
 percent-encoding = "2.3.2"
-quick_cache = "0.6.21"
+quick_cache = "0.7.0"
 nix-nar = "0.5.0"
 
 [dev-dependencies]
